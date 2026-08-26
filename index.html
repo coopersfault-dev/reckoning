@@ -84,6 +84,7 @@
     </div>
     <button class="primary" id="authSubmit">Sign in</button>
     <p class="hint" id="authToggle" style="cursor:pointer;text-decoration:underline;margin-top:10px;">Need an account? Sign up</p>
+    <p class="hint" id="authForgot" style="cursor:pointer;text-decoration:underline;margin-top:6px;">Forgot password?</p>
     <p class="hint" id="authMsg"></p>
   </div>
 </div>
@@ -409,6 +410,10 @@ async function runSync(){
   _syncRunning = true;
   try {
     await pushState();
+  } catch(e){
+    // pushState now re-throws so awaited callers (e.g. the weight logger's
+    // verified save) can report failure. Background/debounced runs don't await,
+    // so we absorb it here to avoid unhandled rejections; the error is logged.
   } finally {
     _syncRunning = false;
     if(_syncQueued){ _syncQueued = false; scheduleSync(); }
@@ -503,7 +508,7 @@ async function pushState(){
     if(planRows.length) await chk('daily_plan.insert', sb.from('daily_plan').insert(planRows));
 
     await chk('user_config.upsert', sb.from('user_config').upsert({user_id:uid, baseline:state.config.baseline, weight_lb:state.config.weightLb, age:state.config.age}));
-  }catch(e){ console.error('Supabase sync failed', e); }
+  }catch(e){ console.error('Supabase sync failed', e); throw e; }
 }
 
 let state = null;
@@ -640,7 +645,7 @@ function draw(){
         y:{ position:'left', min:yF.min, max:yF.max, ticks:{color:'#3987e5',font:{size:11}}, grid:{color:'rgba(107,118,132,0.15)'} },
         y2:{ position:'right', min:yW.min, max:yW.max, ticks:{color:'#eb6834',font:{size:11}}, grid:{display:false} },
         x:{ ticks:{color:'#6b7684',font:{size:10},maxRotation:0,autoSkip:true,maxTicksLimit:6,
-              callback:function(v){ const l=this.getLabelForValue(v); return l ? l.slice(2,7) : l; } },
+              callback:function(v){ const l=this.getLabelForValue(v); return l ? l.slice(5) : l; } },
             grid:{display:false} } } }
   });
   document.querySelectorAll('#wkgRange button').forEach(b=>{
@@ -1006,15 +1011,24 @@ document.getElementById('ridePasteSave').onclick=()=>{
 };
 
 // Weight logging
-document.getElementById('wAdd').onclick=()=>{
+document.getElementById('wAdd').onclick=async ()=>{
   const lb=parseFloat(document.getElementById('wLb').value);
   const d=document.getElementById('wDate').value || todayKey();
   if(isNaN(lb)||lb<=0){ alert('Enter a weight.'); return; }
   state.weights = state.weights.filter(w=>w.date!==d);
   state.weights.push({ date:d, lb });
-  save(state);
+  try{ localStorage.setItem(KEY, JSON.stringify(state)); }catch(e){}  // local save without triggering the debounced sync
   document.getElementById('wLb').value='';
+  document.getElementById('wDate').value=todayKey();  // reset to today for the next entry
   renderStats(); draw(); renderWeightLast();
+  // Await the actual DB write directly, so a test entry can't look saved
+  // locally while silently failing to sync.
+  const el=document.getElementById('wLast');
+  if(el){ el.style.color=''; el.textContent='Saving to cloud\u2026';
+    try{ await pushState(); el.textContent='Saved '+lb.toFixed(1)+' lb on '+d+' \u2713 (synced to cloud)'; }
+    catch(e){ el.textContent='Saved locally but cloud sync FAILED: '+e.message; el.style.color='#e5484d'; return; }
+    setTimeout(renderWeightLast, 3000);
+  }
 };
 function renderWeightLast(){
   const el=document.getElementById('wLast'); if(!el) return;
@@ -1156,8 +1170,10 @@ const authSubmitEl = document.getElementById('authSubmit');
 const authToggleEl = document.getElementById('authToggle');
 const authMsgEl = document.getElementById('authMsg');
 const authSubEl = document.getElementById('authSub');
+const authForgotEl = document.getElementById('authForgot');
 
 authToggleEl.onclick = () => {
+  if(authMode === 'reset') return;
   authMode = authMode === 'signin' ? 'signup' : 'signin';
   authSubmitEl.textContent = authMode === 'signin' ? 'Sign in' : 'Create account';
   authToggleEl.textContent = authMode === 'signin' ? 'Need an account? Sign up' : 'Already have an account? Sign in';
@@ -1165,7 +1181,31 @@ authToggleEl.onclick = () => {
   authMsgEl.textContent = '';
 };
 
+// Send a password-recovery email. Supabase redirects the link back to this same
+// page; onAuthStateChange fires PASSWORD_RECOVERY, which flips the form to "set
+// new password" mode below.
+authForgotEl.onclick = async () => {
+  const email = authEmailEl.value.trim();
+  if(!email){ authMsgEl.style.color = 'var(--amber)'; authMsgEl.textContent = 'Enter your email above first, then tap Forgot password.'; return; }
+  authForgotEl.style.pointerEvents = 'none';
+  const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin + window.location.pathname });
+  if(error){ authMsgEl.style.color = '#e5484d'; authMsgEl.textContent = error.message; }
+  else { authMsgEl.style.color = 'var(--teal)'; authMsgEl.textContent = 'Check your email for a reset link. Open it on this device.'; }
+  authForgotEl.style.pointerEvents = '';
+};
+
 authSubmitEl.onclick = async () => {
+  // Reset mode: the password field now holds the NEW password to set.
+  if(authMode === 'reset'){
+    const newPass = authPassEl.value;
+    if(!newPass || newPass.length < 6){ authMsgEl.style.color = 'var(--amber)'; authMsgEl.textContent = 'Enter a new password (at least 6 characters).'; return; }
+    authSubmitEl.disabled = true;
+    const { error } = await sb.auth.updateUser({ password: newPass });
+    if(error){ authMsgEl.style.color = '#e5484d'; authMsgEl.textContent = error.message; }
+    else { authMsgEl.style.color = 'var(--teal)'; authMsgEl.textContent = 'Password updated. You are signed in.'; }
+    authSubmitEl.disabled = false;
+    return;
+  }
   const email = authEmailEl.value.trim(), pass = authPassEl.value;
   if(!email || !pass){ authMsgEl.style.color = 'var(--amber)'; authMsgEl.textContent = 'Enter email and password.'; return; }
   authSubmitEl.disabled = true;
@@ -1180,10 +1220,28 @@ authSubmitEl.onclick = async () => {
   authSubmitEl.disabled = false;
 };
 
+// When the user arrives via the recovery email link, flip the form into a
+// "set a new password" state instead of dropping them straight into the app.
+function enterResetMode(){
+  authMode = 'reset';
+  showAuth();
+  authSubEl.textContent = 'Set a new password';
+  authEmailEl.style.display = 'none';
+  authEmailEl.previousElementSibling.style.display = 'none'; // its label
+  authPassEl.setAttribute('placeholder','New password');
+  authPassEl.setAttribute('autocomplete','new-password');
+  authSubmitEl.textContent = 'Update password';
+  authToggleEl.style.display = 'none';
+  authForgotEl.style.display = 'none';
+  authMsgEl.style.color = 'var(--text-dim)';
+  authMsgEl.textContent = 'Enter a new password below.';
+}
+
 document.getElementById('signOutBtn').onclick = () => sb.auth.signOut();
 
 sb.auth.onAuthStateChange((event, session) => {
-  if(event === 'SIGNED_IN'){ showApp(session.user.email); initApp(); }
+  if(event === 'PASSWORD_RECOVERY'){ enterResetMode(); return; }
+  if(event === 'SIGNED_IN'){ if(authMode==='reset') return; showApp(session.user.email); initApp(); }
   if(event === 'SIGNED_OUT'){ state = null; showAuth(); }
 });
 
