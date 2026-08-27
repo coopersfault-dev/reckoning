@@ -256,6 +256,15 @@
   <p class="hint" id="ftpLast"></p>
 </div>
 
+<details style="margin-bottom:16px;">
+  <summary>Paste FTP history</summary>
+  <p class="hint" style="margin:6px 0 8px;">One per line: <code>YYYY-MM-DD | watts | note</code> &mdash; e.g. <code>2026-06-30 | 220 | KICKR test</code>. Note is optional. One entry per date (a repeated date overwrites).</p>
+  <textarea id="ftpPaste" rows="5" placeholder="2026-04-15 | 214 | 20-min 225 raw to FTP est&#10;2026-06-30 | 220 | KICKR test, working FTP confirmed&#10;2026-08-21 | 233 | 20min @ 245W test" style="width:100%;font-family:inherit;font-size:14px;background:var(--surface-2);border:0.5px solid var(--border);border-radius:8px;padding:8px;color:var(--text);"></textarea>
+  <div style="display:flex;gap:8px;margin-top:8px;">
+    <button id="ftpPasteSave" class="primary" style="width:auto;padding:7px 16px;">Add these tests</button>
+  </div>
+  <p class="hint" id="ftpPasteMsg" style="margin-top:8px;"></p>
+</details>
 </div>
 
 <div class="dashCard" data-card="rides">
@@ -716,6 +725,11 @@ function drawMacros(){
 
 function renderStats(){
   const w = latest(state.weights), f = latest(state.ftp);
+  if(!w || !f){
+    document.getElementById('stats').innerHTML =
+      '<div class="stat"><div class="lbl">No data yet</div><div class="val" style="font-size:15px;">Log a weight and FTP to begin.</div></div>';
+    return;
+  }
   const wkg = f.w/(w.lb*LB2KG);
   document.getElementById('stats').innerHTML = `
     <div class="stat"><div class="lbl">Working FTP</div><div class="val">${f.w}<small> W</small></div></div>
@@ -1012,15 +1026,17 @@ document.getElementById('ridePasteSave').onclick=()=>{
 
 // Weight logging
 document.getElementById('wAdd').onclick=async ()=>{
+  if(!state){ alert('Not signed in yet \u2014 wait for the app to finish loading, then try again.'); return; }
   const lb=parseFloat(document.getElementById('wLb').value);
   const d=document.getElementById('wDate').value || todayKey();
   if(isNaN(lb)||lb<=0){ alert('Enter a weight.'); return; }
+  if(!Array.isArray(state.weights)) state.weights=[];
   state.weights = state.weights.filter(w=>w.date!==d);
   state.weights.push({ date:d, lb });
   try{ localStorage.setItem(KEY, JSON.stringify(state)); }catch(e){}  // local save without triggering the debounced sync
   document.getElementById('wLb').value='';
   document.getElementById('wDate').value=todayKey();  // reset to today for the next entry
-  renderStats(); draw(); renderWeightLast();
+  try{ renderStats(); draw(); renderWeightLast(); }catch(e){ console.error('render after weight save failed', e); }
   // Await the actual DB write directly, so a test entry can't look saved
   // locally while silently failing to sync.
   const el=document.getElementById('wLast');
@@ -1034,27 +1050,67 @@ function renderWeightLast(){
   const el=document.getElementById('wLast'); if(!el) return;
   const w=latest(state.weights);
   const f=latest(state.ftp);
-  el.textContent = `Last logged: ${w.lb.toFixed(1)} lb on ${w.date} \u00b7 W/kg ${(f.w/(w.lb*LB2KG)).toFixed(2)}`;
+  if(!w){ el.textContent=''; return; }
+  el.textContent = f
+    ? `Last logged: ${w.lb.toFixed(1)} lb on ${w.date} \u00b7 W/kg ${(f.w/(w.lb*LB2KG)).toFixed(2)}`
+    : `Last logged: ${w.lb.toFixed(1)} lb on ${w.date}`;
 }
 
 // FTP logging
-document.getElementById('ftpAdd').onclick=()=>{
+document.getElementById('ftpAdd').onclick=async ()=>{
+  if(!state){ alert('Not signed in yet \u2014 wait for the app to finish loading, then try again.'); return; }
   const w=parseFloat(document.getElementById('ftpW').value);
   const d=document.getElementById('ftpDate').value || todayKey();
   const note=document.getElementById('ftpNote').value.trim() || null;
   if(isNaN(w)||w<=0){ alert('Enter an FTP value.'); return; }
+  if(!Array.isArray(state.ftp)) state.ftp=[];
   state.ftp = state.ftp.filter(f=>f.date!==d);
   state.ftp.push({ date:d, w, note });
-  save(state);
+  try{ localStorage.setItem(KEY, JSON.stringify(state)); }catch(e){}  // local save without the debounced sync
   document.getElementById('ftpW').value='';
   document.getElementById('ftpNote').value='';
-  renderStats(); draw(); renderWeightLast(); renderFtpLast();
+  document.getElementById('ftpDate').value=todayKey();  // reset for next entry
+  try{ renderStats(); draw(); renderWeightLast(); renderFtpLast(); }catch(e){ console.error('render after ftp save failed', e); }
+  const el=document.getElementById('ftpLast');
+  if(el){ el.style.color=''; el.textContent='Saving to cloud\u2026';
+    try{ await pushState(); el.textContent='Saved '+w+' W on '+d+' \u2713 (synced to cloud)'; }
+    catch(e){ el.textContent='Saved locally but cloud sync FAILED: '+e.message; el.style.color='#e5484d'; return; }
+    setTimeout(renderFtpLast, 3000);
+  }
 };
 function renderFtpLast(){
   const el=document.getElementById('ftpLast'); if(!el) return;
   const f=latest(state.ftp);
+  if(!f){ el.textContent=''; return; }
   el.textContent = `Last logged: ${f.w} W on ${f.date}${f.note?' \u00b7 '+f.note:''}`;
 }
+
+// Paste FTP history: "YYYY-MM-DD | watts | note" (note optional)
+document.getElementById('ftpPasteSave').onclick=async ()=>{
+  const txt=document.getElementById('ftpPaste').value.trim();
+  const msg=document.getElementById('ftpPasteMsg');
+  if(!txt){ return; }
+  let n=0, skipped=0;
+  txt.split('\n').forEach(line=>{
+    if(!line.trim()) return;
+    const parts=line.split('|').map(x=>x.trim());
+    const d=parts[0];
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(d)){ skipped++; return; }
+    const w=parseInt(parts[1]);
+    if(isNaN(w)||w<=0){ skipped++; return; }
+    state.ftp = state.ftp.filter(f=>f.date!==d);   // one entry per date
+    state.ftp.push({ date:d, w, note: parts[2] || null });
+    n++;
+  });
+  state.ftp.sort((a,b)=>a.date<b.date?-1:1);
+  try{ localStorage.setItem(KEY, JSON.stringify(state)); }catch(e){}
+  renderStats(); draw(); renderWeightLast(); renderFtpLast();
+  if(msg){ msg.style.color=''; msg.textContent='Saving to cloud\u2026';
+    try{ await pushState(); msg.style.color='var(--teal)'; msg.textContent=n+' test'+(n===1?'':'s')+' added and synced \u2713'+(skipped?' ('+skipped+' line'+(skipped===1?'':'s')+' skipped \u2014 bad format)':''); }
+    catch(e){ msg.style.color='#e5484d'; msg.textContent='Saved locally but cloud sync FAILED: '+e.message; return; }
+  }
+  document.getElementById('ftpPaste').value='';
+};
 
 document.getElementById('exportBtn').onclick=()=>{
   const blob=new Blob([JSON.stringify(state,null,2)],{type:'application/json'});
