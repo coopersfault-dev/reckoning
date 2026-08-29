@@ -809,11 +809,24 @@ function renderRides(){
     const rc = recoveryCost(r);
     const flag = rc ? `<span style="font-size:10px;color:${rc.color};border:0.5px solid ${rc.color};border-radius:4px;padding:1px 5px;margin-left:6px;">${rc.flag}</span>` : '';
     const rcLine = rc ? `<div class="m" style="color:${rc.color};">${rc.msg} <span style="color:var(--text-mute);">(${rc.why})</span></div>` : '';
-    return `<div class="item"><div><div class="t" style="font-weight:500;">${r.title} <span style="font-size:12px;color:var(--text-mute);font-weight:400;">${r.date}</span>${badge}${flag}</div>
+    const key = (r.date||'')+'||'+(r.title||'');
+    return `<div class="item"><div style="flex:1;"><div class="t" style="font-weight:500;">${r.title} <span style="font-size:12px;color:var(--text-mute);font-weight:400;">${r.date}</span>${badge}${flag}</div>
     <div class="m">${r.ef?'EF '+r.ef.toFixed(3)+' \u00b7 ':''}${r.vi?'VI '+r.vi.toFixed(2)+' \u00b7 ':''}${r.kcal?Math.round(r.kcal)+' kcal'+(r.burnSrc==='HR-est'?'(est)':'')+' \u00b7 ':''}${r.dur?r.dur+' \u00b7 ':''}${r.temp||''}</div>
     ${rcLine}
-    ${r.note?'<div class="m">'+r.note+'</div>':''}</div></div>`;
+    ${r.note?'<div class="m">'+r.note+'</div>':''}</div>
+    <button class="del" data-rmride="${encodeURIComponent(key)}">&times;</button></div>`;
   }).join('');
+  document.querySelectorAll('#rideList [data-rmride]').forEach(b=>b.onclick=async ()=>{
+    const key=decodeURIComponent(b.dataset.rmride);
+    const [date,title]=key.split('||');
+    const idx=state.rides.findIndex(r=>(r.date||'')===date && (r.title||'')===title);
+    if(idx===-1) return;
+    if(!confirm('Delete this activity?\n\n'+title+' ('+date+')')) return;
+    state.rides.splice(idx,1);
+    try{ localStorage.setItem(KEY, JSON.stringify(state)); }catch(e){}
+    try{ renderRides(); drawBalance(); }catch(e){ console.error(e); }
+    try{ await pushState(); }catch(e){ alert('Deleted locally but cloud sync failed: '+e.message); }
+  });
 }
 
 let chkDate = todayKey();
