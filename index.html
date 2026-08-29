@@ -153,8 +153,8 @@
 
 <details style="margin-bottom:16px;">
   <summary>Paste a day's meals</summary>
-  <p class="hint" style="margin:6px 0 8px;">One item per line, applies to the date shown above (<span id="foodPasteDate"></span>): <code>name | calories | protein g | carbs g | fat g</code> &mdash; e.g. <code>Chicken burrito bowl | 620 | 48 | 55 | 18</code>. Leave protein/carbs/fat blank if you don't know them.</p>
-  <textarea id="foodPaste" rows="6" placeholder="Chicken burrito bowl | 620 | 48 | 55 | 18&#10;Greek yogurt | 150 | 20 | 10 | 3&#10;Coffee with cream | 40" style="width:100%;font-family:inherit;font-size:14px;background:var(--surface-2);border:0.5px solid var(--border);border-radius:8px;padding:8px;color:var(--text);"></textarea>
+  <p class="hint" style="margin:6px 0 8px;">One item per line: <code>name | calories | protein g | carbs g | fat g</code>. Start a line with a date (<code>YYYY-MM-DD | name | ...</code>) to send it to that day; lines with no date go to the day shown above (<span id="foodPasteDate"></span>). Leave protein/carbs/fat blank if unknown.</p>
+  <textarea id="foodPaste" rows="6" placeholder="2026-08-24 | Chicken burrito bowl | 620 | 48 | 55 | 18&#10;2026-08-24 | Greek yogurt | 150 | 20 | 10 | 3&#10;Coffee with cream | 40" style="width:100%;font-family:inherit;font-size:14px;background:var(--surface-2);border:0.5px solid var(--border);border-radius:8px;padding:8px;color:var(--text);"></textarea>
   <div style="display:flex;gap:8px;margin-top:8px;">
     <button id="foodPasteSave" class="primary" style="width:auto;padding:7px 16px;">Add these meals</button>
   </div>
@@ -988,28 +988,40 @@ document.getElementById('planClear').onclick=()=>{
 };
 
 // Paste meals: "name | calories | protein | carbs | fat" (protein/carbs/fat optional) — applies to viewDate
-document.getElementById('foodPasteSave').onclick=()=>{
+document.getElementById('foodPasteSave').onclick=async ()=>{
+  if(!state){ alert('Not signed in yet \u2014 wait for the app to finish loading.'); return; }
   const txt=document.getElementById('foodPaste').value.trim();
   if(!txt) return;
-  const tk=viewDate; if(!state.food[tk]) state.food[tk]={items:[]};
-  let n=0;
+  const dateRe=/^\d{4}-\d{2}-\d{2}$/;
+  const touched={}; let n=0;
   txt.split('\n').forEach(line=>{
-    const parts=line.split('|').map(x=>x.trim());
+    if(!line.trim()) return;
+    let parts=line.split('|').map(x=>x.trim());
+    // Optional leading date: if the first field is a YYYY-MM-DD, it sets the day
+    // for this line; otherwise the line lands on the currently-shown day.
+    let day=viewDate;
+    if(parts.length && dateRe.test(parts[0])){ day=parts.shift(); }
     const name=parts[0];
     if(!name) return;
-    state.food[tk].items.push({
+    if(!state.food[day]) state.food[day]={items:[]};
+    state.food[day].items.push({
       name,
       kcal: parseInt(parts[1])||0,
       p: parseInt(parts[2])||0,
       c: parseInt(parts[3])||0,
       f: parseInt(parts[4])||0
     });
-    n++;
+    touched[day]=(touched[day]||0)+1; n++;
   });
-  save(state);
-  document.getElementById('foodPaste').value='';
-  renderFood(); drawBalance(); drawMacros();
-  alert(n+' item'+(n===1?'':'s')+' added to '+prettyDate(tk)+'.');
+  try{ localStorage.setItem(KEY, JSON.stringify(state)); }catch(e){}
+  try{ renderFood(); drawBalance(); drawMacros(); }catch(e){ console.error(e); }
+  const days=Object.keys(touched).sort();
+  const breakdown = days.length===1
+    ? prettyDate(days[0])
+    : days.map(d=>d.slice(5)+' ('+touched[d]+')').join(', ');
+  try{ await pushState(); document.getElementById('foodPaste').value='';
+       alert(n+' item'+(n===1?'':'s')+' added \u2713 synced \u2014 '+breakdown); }
+  catch(e){ alert('Added locally but cloud sync FAILED: '+e.message); }
 };
 
 // Paste rides: "YYYY-MM-DD | title | duration | calories | notes" (calories optional)
