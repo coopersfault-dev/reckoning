@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Sharpen Block Dashboard</title>
+<title>Reckoning</title>
 <style>
   :root {
     --bg: #0e1116;
@@ -75,7 +75,7 @@
 <body>
 
 <div id="authGate" style="max-width:340px;margin:60px auto;padding:0 16px;">
-  <h1 style="margin-bottom:4px;">Sharpen block</h1>
+  <h1 style="margin-bottom:4px;">Reckoning</h1>
   <p class="sub" id="authSub">Sign in to your account</p>
   <div class="card">
     <div class="row">
@@ -84,12 +84,13 @@
     </div>
     <button class="primary" id="authSubmit">Sign in</button>
     <p class="hint" id="authToggle" style="cursor:pointer;text-decoration:underline;margin-top:10px;">Need an account? Sign up</p>
+    <p class="hint" id="authForgot" style="cursor:pointer;text-decoration:underline;margin-top:6px;">Forgot password?</p>
     <p class="hint" id="authMsg"></p>
   </div>
 </div>
 
 <div id="app" style="display:none;">
-<h1>Sharpen block</h1>
+<h1>Reckoning</h1>
 <p class="sub">Aug 7&ndash;23 &middot; FTP 220 &rarr; 235-240W &middot; W/kg is the lever now</p>
 
 <div style="display:flex;justify-content:flex-end;margin-bottom:8px;">
@@ -105,13 +106,19 @@
 
 <div class="dashCard" data-card="wkg">
 <div class="cardCtrl" style="display:none;gap:6px;margin-bottom:8px;"><button class="ctrlBtn" data-act="up" style="width:auto;padding:4px 10px;font-size:12px;">&uarr;</button><button class="ctrlBtn" data-act="down" style="width:auto;padding:4px 10px;font-size:12px;">&darr;</button><button class="ctrlBtn" data-act="hide" style="width:auto;padding:4px 10px;font-size:12px;">Hide</button></div>
-<h2>W/kg trend</h2>
-<div style="display:flex;gap:16px;font-size:12px;color:var(--text-dim);margin-bottom:8px;">
-  <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#3987e5;vertical-align:middle;"></span> W/kg</span>
-  <span><span style="display:inline-block;width:12px;height:2px;background:#199e70;vertical-align:middle;"></span> Target 3.65</span>
+<h2>FTP &amp; weight</h2>
+<div style="display:flex;gap:16px;font-size:12px;color:var(--text-dim);margin-bottom:8px;flex-wrap:wrap;">
+  <span><span style="display:inline-block;width:12px;height:2px;background:#3987e5;vertical-align:middle;"></span> FTP (W, left)</span>
+  <span><span style="display:inline-block;width:12px;height:2px;background:#eb6834;vertical-align:middle;"></span> Weight (lb, right)</span>
+</div>
+<div style="display:flex;gap:6px;margin-bottom:8px;" id="wkgRange">
+  <button data-range="6m" style="width:auto;padding:5px 11px;font-size:12px;">6M</button>
+  <button data-range="1y" style="width:auto;padding:5px 11px;font-size:12px;">1Y</button>
+  <button data-range="2y" style="width:auto;padding:5px 11px;font-size:12px;">2Y</button>
+  <button data-range="all" style="width:auto;padding:5px 11px;font-size:12px;">All</button>
 </div>
 <div style="position:relative;height:210px;margin-bottom:8px;">
-  <canvas id="wkg" role="img" aria-label="W per kg trend rising toward 3.65 target"></canvas>
+  <canvas id="wkg" role="img" aria-label="FTP in watts and body weight in pounds over time"></canvas>
 </div>
 
 </div>
@@ -146,8 +153,8 @@
 
 <details style="margin-bottom:16px;">
   <summary>Paste a day's meals</summary>
-  <p class="hint" style="margin:6px 0 8px;">One item per line, applies to the date shown above (<span id="foodPasteDate"></span>): <code>name | calories | protein g | carbs g | fat g</code> &mdash; e.g. <code>Chicken burrito bowl | 620 | 48 | 55 | 18</code>. Leave protein/carbs/fat blank if you don't know them.</p>
-  <textarea id="foodPaste" rows="6" placeholder="Chicken burrito bowl | 620 | 48 | 55 | 18&#10;Greek yogurt | 150 | 20 | 10 | 3&#10;Coffee with cream | 40" style="width:100%;font-family:inherit;font-size:14px;background:var(--surface-2);border:0.5px solid var(--border);border-radius:8px;padding:8px;color:var(--text);"></textarea>
+  <p class="hint" style="margin:6px 0 8px;">One item per line: <code>name | calories | protein g | carbs g | fat g</code>. Start a line with a date (<code>YYYY-MM-DD | name | ...</code>) to send it to that day; lines with no date go to the day shown above (<span id="foodPasteDate"></span>). Leave protein/carbs/fat blank if unknown.</p>
+  <textarea id="foodPaste" rows="6" placeholder="2026-08-24 | Chicken burrito bowl | 620 | 48 | 55 | 18&#10;2026-08-24 | Greek yogurt | 150 | 20 | 10 | 3&#10;Coffee with cream | 40" style="width:100%;font-family:inherit;font-size:14px;background:var(--surface-2);border:0.5px solid var(--border);border-radius:8px;padding:8px;color:var(--text);"></textarea>
   <div style="display:flex;gap:8px;margin-top:8px;">
     <button id="foodPasteSave" class="primary" style="width:auto;padding:7px 16px;">Add these meals</button>
   </div>
@@ -249,6 +256,15 @@
   <p class="hint" id="ftpLast"></p>
 </div>
 
+<details style="margin-bottom:16px;">
+  <summary>Paste FTP history</summary>
+  <p class="hint" style="margin:6px 0 8px;">One per line: <code>YYYY-MM-DD | watts | note</code> &mdash; e.g. <code>2026-06-30 | 220 | KICKR test</code>. Note is optional. One entry per date (a repeated date overwrites).</p>
+  <textarea id="ftpPaste" rows="5" placeholder="2026-04-15 | 214 | 20-min 225 raw to FTP est&#10;2026-06-30 | 220 | KICKR test, working FTP confirmed&#10;2026-08-21 | 233 | 20min @ 245W test" style="width:100%;font-family:inherit;font-size:14px;background:var(--surface-2);border:0.5px solid var(--border);border-radius:8px;padding:8px;color:var(--text);"></textarea>
+  <div style="display:flex;gap:8px;margin-top:8px;">
+    <button id="ftpPasteSave" class="primary" style="width:auto;padding:7px 16px;">Add these tests</button>
+  </div>
+  <p class="hint" id="ftpPasteMsg" style="margin-top:8px;"></p>
+</details>
 </div>
 
 <div class="dashCard" data-card="rides">
@@ -392,6 +408,7 @@ function load() {
 // any two quick actions could overlap. The scheduler below guarantees that at
 // most one pushState is ever in flight, and coalesces bursts into a single write.
 let _syncTimer = null, _syncRunning = false, _syncQueued = false;
+let _dirty = null;   // Set of tables needing sync; null means "everything"
 
 function scheduleSync(){
   clearTimeout(_syncTimer);
@@ -401,15 +418,35 @@ function scheduleSync(){
 async function runSync(){
   if(_syncRunning){ _syncQueued = true; return; }   // fold into the current run
   _syncRunning = true;
+  const tables = _fullDirty ? null : (_dirty ? [..._dirty] : null);   // snapshot
+  _dirty = null; _fullDirty = false;
   try {
-    await pushState();
+    await pushState(tables);
+  } catch(e){
+    // pushState re-throws so awaited callers (e.g. the weight logger) can report
+    // failure. Background/debounced runs don't await, so we absorb here.
   } finally {
     _syncRunning = false;
     if(_syncQueued){ _syncQueued = false; scheduleSync(); }
   }
 }
 
-function save(s){ try{ localStorage.setItem(KEY, JSON.stringify(s)); }catch(e){} scheduleSync(); }
+// save(state) or save(state, 'weights'|['weights','ftp_tests']). Naming the
+// changed table(s) means a food edit only rewrites food_items and can never
+// overwrite an unrelated table (e.g. weights) with a stale in-memory copy.
+// Omitting the table forces a FULL sync (used by import). Across a debounce
+// burst, dirty tables accumulate; if any call omits the table, the whole
+// pending write upgrades to full.
+let _fullDirty = false;
+function save(s, table){
+  try{ localStorage.setItem(KEY, JSON.stringify(s)); }catch(e){}
+  if(table===undefined){ _fullDirty = true; _dirty = null; }
+  else if(!_fullDirty){
+    if(_dirty===null) _dirty = new Set();
+    (Array.isArray(table)?table:[table]).forEach(t=>_dirty.add(t));
+  }
+  scheduleSync();
+}
 
 // Don't let a queued write die with the tab.
 window.addEventListener('beforeunload', () => {
@@ -466,38 +503,54 @@ async function chk(label, q){
   return res;
 }
 
-async function pushState(){
+// pushState(only) writes just the named tables. This matters because every
+// write is still delete-all-then-reinsert for that table, so writing a table
+// you didn't change risks overwriting it with a stale in-memory copy. Logging
+// food should touch ONLY food_items; logging weight ONLY weights. Passing no
+// argument syncs everything (used for imports / full pushes).
+async function pushState(only){
   const { data: { user } } = await sb.auth.getUser();
   if(!user || !state) return;
   const uid = user.id;
+  const want = only ? (Array.isArray(only)?only:[only]) : null;
+  const doTable = t => !want || want.includes(t);
   try{
-    await chk('weights.delete', sb.from('weights').delete().eq('user_id', uid));
-    if(state.weights.length) await chk('weights.insert', sb.from('weights').insert(state.weights.map(w=>({user_id:uid,date:w.date,lb:w.lb}))));
-
-    await chk('ftp_tests.delete', sb.from('ftp_tests').delete().eq('user_id', uid));
-    if(state.ftp.length) await chk('ftp_tests.insert', sb.from('ftp_tests').insert(state.ftp.map(f=>({user_id:uid,date:f.date,watts:f.w,note:f.note||null}))));
-
-    await chk('rides.delete', sb.from('rides').delete().eq('user_id', uid));
-    if(state.rides.length) await chk('rides.insert', sb.from('rides').insert(state.rides.map(r=>({user_id:uid,date:r.date,title:r.title||null,ef:r.ef,vi:r.vi,type:r.type,z4min:r.z4min,z5min:r.z5min,surges:r.surges,kcal:r.kcal,burn_src:r.burnSrc,dur:r.dur,temp:r.temp,note:r.note}))));
-
-    const foodRows=[];
-    Object.keys(state.food).forEach(d=>{ (state.food[d].items||[]).forEach(it=>foodRows.push({user_id:uid,date:d,name:it.name,kcal:it.kcal,protein:it.p,carbs:it.c,fat:it.f})); });
-    await chk('food_items.delete', sb.from('food_items').delete().eq('user_id', uid));
-    if(foodRows.length) await chk('food_items.insert', sb.from('food_items').insert(foodRows));
-
-    await chk('saved_meals.delete', sb.from('saved_meals').delete().eq('user_id', uid));
-    if((state.saved||[]).length) await chk('saved_meals.insert', sb.from('saved_meals').insert(state.saved.map(m=>({user_id:uid,name:m.name,kcal:m.kcal,protein:m.p,carbs:m.c,fat:m.f}))));
-
-    await chk('daily_checklist.delete', sb.from('daily_checklist').delete().eq('user_id', uid));
-    const chkRows = Object.keys(state.checklist).map(d=>({user_id:uid,date:d,done:state.checklist[d].done||{},custom:state.checklist[d].custom||[]}));
-    if(chkRows.length) await chk('daily_checklist.insert', sb.from('daily_checklist').insert(chkRows));
-
-    await chk('daily_plan.delete', sb.from('daily_plan').delete().eq('user_id', uid));
-    const planRows = Object.keys(state.plan).map(d=>({user_id:uid,date:d,what:state.plan[d].what||null,where_:state.plan[d].where||null}));
-    if(planRows.length) await chk('daily_plan.insert', sb.from('daily_plan').insert(planRows));
-
-    await chk('user_config.upsert', sb.from('user_config').upsert({user_id:uid, baseline:state.config.baseline, weight_lb:state.config.weightLb, age:state.config.age}));
-  }catch(e){ console.error('Supabase sync failed', e); }
+    if(doTable('weights')){
+      await chk('weights.delete', sb.from('weights').delete().eq('user_id', uid));
+      if(state.weights.length) await chk('weights.insert', sb.from('weights').insert(state.weights.map(w=>({user_id:uid,date:w.date,lb:w.lb}))));
+    }
+    if(doTable('ftp_tests')){
+      await chk('ftp_tests.delete', sb.from('ftp_tests').delete().eq('user_id', uid));
+      if(state.ftp.length) await chk('ftp_tests.insert', sb.from('ftp_tests').insert(state.ftp.map(f=>({user_id:uid,date:f.date,watts:f.w,note:f.note||null}))));
+    }
+    if(doTable('rides')){
+      await chk('rides.delete', sb.from('rides').delete().eq('user_id', uid));
+      if(state.rides.length) await chk('rides.insert', sb.from('rides').insert(state.rides.map(r=>({user_id:uid,date:r.date,title:r.title||null,ef:r.ef,vi:r.vi,type:r.type,z4min:r.z4min,z5min:r.z5min,surges:r.surges,kcal:r.kcal,burn_src:r.burnSrc,dur:r.dur,temp:r.temp,note:r.note}))));
+    }
+    if(doTable('food_items')){
+      const foodRows=[];
+      Object.keys(state.food).forEach(d=>{ (state.food[d].items||[]).forEach(it=>foodRows.push({user_id:uid,date:d,name:it.name,kcal:it.kcal,protein:it.p,carbs:it.c,fat:it.f})); });
+      await chk('food_items.delete', sb.from('food_items').delete().eq('user_id', uid));
+      if(foodRows.length) await chk('food_items.insert', sb.from('food_items').insert(foodRows));
+    }
+    if(doTable('saved_meals')){
+      await chk('saved_meals.delete', sb.from('saved_meals').delete().eq('user_id', uid));
+      if((state.saved||[]).length) await chk('saved_meals.insert', sb.from('saved_meals').insert(state.saved.map(m=>({user_id:uid,name:m.name,kcal:m.kcal,protein:m.p,carbs:m.c,fat:m.f}))));
+    }
+    if(doTable('daily_checklist')){
+      await chk('daily_checklist.delete', sb.from('daily_checklist').delete().eq('user_id', uid));
+      const chkRows = Object.keys(state.checklist).map(d=>({user_id:uid,date:d,done:state.checklist[d].done||{},custom:state.checklist[d].custom||[]}));
+      if(chkRows.length) await chk('daily_checklist.insert', sb.from('daily_checklist').insert(chkRows));
+    }
+    if(doTable('daily_plan')){
+      await chk('daily_plan.delete', sb.from('daily_plan').delete().eq('user_id', uid));
+      const planRows = Object.keys(state.plan).map(d=>({user_id:uid,date:d,what:state.plan[d].what||null,where_:state.plan[d].where||null}));
+      if(planRows.length) await chk('daily_plan.insert', sb.from('daily_plan').insert(planRows));
+    }
+    if(doTable('user_config')){
+      await chk('user_config.upsert', sb.from('user_config').upsert({user_id:uid, baseline:state.config.baseline, weight_lb:state.config.weightLb, age:state.config.age}));
+    }
+  }catch(e){ console.error('Supabase sync failed', e); throw e; }
 }
 
 let state = null;
@@ -565,33 +618,92 @@ function recoveryCost(r){
   return { ...meta, why };
 }
 
-function wkgSeries(){
-  const ws = sortByDate(state.weights,'asc'), fs = sortByDate(state.ftp,'asc');
-  const dates = [...new Set([...ws.map(w=>w.date),...fs.map(f=>f.date)])].sort();
-  const nW = d=>{let v=ws[0].lb; for(const w of ws){if(w.date<=d)v=w.lb;} return v;};
-  const nF = d=>{let v=fs[0].w; for(const f of fs){if(f.date<=d)v=f.w;} return v;};
-  return dates.map(d=>({date:d, wkg:nF(d)/(nW(d)*LB2KG)}));
+// FTP is a slow-moving metric, so this chart runs over months/years rather than
+// the 14-day windows used elsewhere. FTP is carried forward between tests (a
+// stepped line); weight is plotted only on days it was actually logged.
+const RANGE_DAYS = { '6m':183, '1y':365, '2y':730 };
+let chartRange = 'all';
+
+function ftpWeightSeries(){
+  const ws = sortByDate(state.weights||[],'asc'), fs = sortByDate(state.ftp||[],'asc');
+  if(!ws.length && !fs.length) return [];
+  const all = [...new Set([...ws.map(w=>w.date),...fs.map(f=>f.date)])].sort();
+  let dates = all;
+  if(RANGE_DAYS[chartRange]){
+    const cutoff = dateShift(todayKey(), -RANGE_DAYS[chartRange]);
+    const inRange = all.filter(d=>d>=cutoff);
+    if(inRange.length >= 2) dates = inRange;   // fall back to everything if the window is near-empty
+  }
+  const wOn = {}; ws.forEach(w=>{ wOn[w.date]=w.lb; });
+  const nW = d=>{ if(!ws.length) return null; let v=ws[0].lb; for(const w of ws){ if(w.date<=d) v=w.lb; } return v; };
+  const nF = d=>{ if(!fs.length) return null; let v=fs[0].w; for(const f of fs){ if(f.date<=d) v=f.w; } return v; };
+  return dates.map(d=>({
+    date: d,
+    ftp: nF(d),
+    lb: (wOn[d]!==undefined) ? wOn[d] : null,
+    wkg: (nF(d) && nW(d)) ? nF(d)/(nW(d)*LB2KG) : null
+  }));
+}
+
+function padRange(vals, minPad){
+  const v = vals.filter(x=>x!==null && x!==undefined && !isNaN(x));
+  if(!v.length) return { min:undefined, max:undefined };
+  const lo=Math.min(...v), hi=Math.max(...v);
+  const pad = Math.max(minPad, (hi-lo)*0.2);
+  return { min:+(lo-pad).toFixed(1), max:+(hi+pad).toFixed(1) };
 }
 
 let chart;
 function draw(){
-  const pts = wkgSeries();
   const el = document.getElementById('wkg');
+  if(!el) return;
+  const pts = ftpWeightSeries();
   if(chart) chart.destroy();
-  const vals = pts.map(p=>p.wkg).concat([3.65]);
-  const lo = Math.min(...vals), hi = Math.max(...vals);
-  const pad = Math.max(0.05, (hi-lo)*0.15);
+  const ftpVals = pts.map(p=>p.ftp);
+  const lbVals = pts.map(p=>p.lb);
+  const yF = padRange(ftpVals, 5);
+  const yW = padRange(lbVals, 1.5);
   chart = new Chart(el,{
     type:'line',
-    data:{ labels:pts.map(p=>p.date.slice(5)), datasets:[
-      { data:pts.map(p=>+p.wkg.toFixed(3)), borderColor:'#3987e5', backgroundColor:'rgba(57,135,229,0.12)', borderWidth:2, tension:0.25, pointRadius:4, pointBackgroundColor:'#3987e5', fill:true },
-      { data:pts.map(()=>3.65), borderColor:'#199e70', borderWidth:2, borderDash:[5,5], pointRadius:0, fill:false }
+    data:{ labels:pts.map(p=>p.date), datasets:[
+      { label:'FTP', data:ftpVals, yAxisID:'y', borderColor:'#3987e5', backgroundColor:'rgba(57,135,229,0.10)',
+        borderWidth:2, stepped:true, pointRadius:3, pointBackgroundColor:'#3987e5', fill:true },
+      { label:'Weight', data:lbVals, yAxisID:'y2', borderColor:'#eb6834', backgroundColor:'transparent',
+        borderWidth:2, tension:0.25, pointRadius:3, pointBackgroundColor:'#eb6834', spanGaps:true, fill:false }
     ]},
-    options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}},
-      scales:{ y:{min:+(lo-pad).toFixed(2),max:+(hi+pad).toFixed(2),ticks:{color:'#6b7684',font:{size:11}},grid:{color:'rgba(107,118,132,0.15)'}},
-        x:{ticks:{color:'#6b7684',font:{size:11}},grid:{display:false}} } }
+    options:{ responsive:true, maintainAspectRatio:false,
+      plugins:{ legend:{display:false},
+        tooltip:{ mode:'index', intersect:false,
+          callbacks:{
+            label:(ctx)=> ctx.dataset.label==='FTP'
+              ? 'FTP: '+Math.round(ctx.parsed.y)+' W'
+              : 'Weight: '+ctx.parsed.y.toFixed(1)+' lb',
+            afterBody:(items)=>{
+              const p = pts[items[0].dataIndex];
+              return p && p.wkg ? 'W/kg: '+p.wkg.toFixed(2) : '';
+            }
+          } } },
+      scales:{
+        y:{ position:'left', min:yF.min, max:yF.max, ticks:{color:'#3987e5',font:{size:11}}, grid:{color:'rgba(107,118,132,0.15)'} },
+        y2:{ position:'right', min:yW.min, max:yW.max, ticks:{color:'#eb6834',font:{size:11}}, grid:{display:false} },
+        x:{ ticks:{color:'#6b7684',font:{size:10},maxRotation:0,autoSkip:true,maxTicksLimit:6,
+              callback:function(v){ const l=this.getLabelForValue(v); return l ? l.slice(5) : l; } },
+            grid:{display:false} } } }
+  });
+  document.querySelectorAll('#wkgRange button').forEach(b=>{
+    const on = b.dataset.range===chartRange;
+    b.style.background = on ? 'var(--blue)' : 'var(--surface-2)';
+    b.style.borderColor = on ? 'var(--blue)' : 'var(--border)';
+    b.style.color = on ? '#fff' : 'var(--text)';
   });
 }
+
+document.getElementById('wkgRange').addEventListener('click',(e)=>{
+  const b = e.target.closest('button[data-range]');
+  if(!b) return;
+  chartRange = b.dataset.range;
+  draw();
+});
 
 function last14(){
   const days=[]; for(let i=13;i>=0;i--) days.push(dateShift(todayKey(),-i)); return days;
@@ -646,12 +758,17 @@ function drawMacros(){
 
 function renderStats(){
   const w = latest(state.weights), f = latest(state.ftp);
+  if(!w || !f){
+    document.getElementById('stats').innerHTML =
+      '<div class="stat"><div class="lbl">No data yet</div><div class="val" style="font-size:15px;">Log a weight and FTP to begin.</div></div>';
+    return;
+  }
   const wkg = f.w/(w.lb*LB2KG);
   document.getElementById('stats').innerHTML = `
     <div class="stat"><div class="lbl">Working FTP</div><div class="val">${f.w}<small> W</small></div></div>
     <div class="stat"><div class="lbl">Weight</div><div class="val">${w.lb.toFixed(1)}<small> lb</small></div></div>
     <div class="stat"><div class="lbl">Current W/kg</div><div class="val">${wkg.toFixed(2)}</div></div>
-    <div class="stat"><div class="lbl">Target W/kg</div><div class="val" style="color:var(--teal)">3.65</div></div>`;
+    <div class="stat"><div class="lbl">Target W/kg</div><div class="val" style="color:var(--teal)">3.65<small style="color:var(--text-dim);"> ${wkg>=3.65?'reached':'&minus;'+(3.65-wkg).toFixed(2)}</small></div></div>`;
 }
 
 function mc(label,val,tgt,unit){
@@ -693,7 +810,7 @@ function renderFood(){
     list.innerHTML = items.map((it,i)=>`<div class="item"><div><div class="t">${it.name}</div>
       <div class="m">${it.kcal} kcal &middot; ${it.p}p ${it.c}c ${it.f}f</div></div>
       <button class="del" data-fd="${i}">&times;</button></div>`).join('');
-    list.querySelectorAll('[data-fd]').forEach(b=>b.onclick=()=>{ state.food[tk].items.splice(+b.dataset.fd,1); save(state); renderFood(); drawBalance(); drawMacros(); });
+    list.querySelectorAll('[data-fd]').forEach(b=>b.onclick=()=>{ state.food[tk].items.splice(+b.dataset.fd,1); save(state,'food_items'); renderFood(); drawBalance(); drawMacros(); });
   }
 }
 
@@ -709,10 +826,10 @@ function renderSaved(){
     const m = state.saved[+b.dataset.add]; const tk=viewDate;
     if(!state.food[tk]) state.food[tk]={items:[]};
     state.food[tk].items.push({ name:m.name, kcal:m.kcal, p:m.p, c:m.c, f:m.f });
-    save(state); renderFood(); drawBalance(); drawMacros();
+    save(state,'food_items'); renderFood(); drawBalance(); drawMacros();
   });
   wrap.querySelectorAll('[data-rm]').forEach(b=>b.onclick=()=>{
-    if(confirm('Remove this saved meal?')){ state.saved.splice(+b.dataset.rm,1); save(state); renderSaved(); }
+    if(confirm('Remove this saved meal?')){ state.saved.splice(+b.dataset.rm,1); save(state,'saved_meals'); renderSaved(); }
   });
 }
 
@@ -725,11 +842,24 @@ function renderRides(){
     const rc = recoveryCost(r);
     const flag = rc ? `<span style="font-size:10px;color:${rc.color};border:0.5px solid ${rc.color};border-radius:4px;padding:1px 5px;margin-left:6px;">${rc.flag}</span>` : '';
     const rcLine = rc ? `<div class="m" style="color:${rc.color};">${rc.msg} <span style="color:var(--text-mute);">(${rc.why})</span></div>` : '';
-    return `<div class="item"><div><div class="t" style="font-weight:500;">${r.title} <span style="font-size:12px;color:var(--text-mute);font-weight:400;">${r.date}</span>${badge}${flag}</div>
+    const key = (r.date||'')+'||'+(r.title||'');
+    return `<div class="item"><div style="flex:1;"><div class="t" style="font-weight:500;">${r.title} <span style="font-size:12px;color:var(--text-mute);font-weight:400;">${r.date}</span>${badge}${flag}</div>
     <div class="m">${r.ef?'EF '+r.ef.toFixed(3)+' \u00b7 ':''}${r.vi?'VI '+r.vi.toFixed(2)+' \u00b7 ':''}${r.kcal?Math.round(r.kcal)+' kcal'+(r.burnSrc==='HR-est'?'(est)':'')+' \u00b7 ':''}${r.dur?r.dur+' \u00b7 ':''}${r.temp||''}</div>
     ${rcLine}
-    ${r.note?'<div class="m">'+r.note+'</div>':''}</div></div>`;
+    ${r.note?'<div class="m">'+r.note+'</div>':''}</div>
+    <button class="del" data-rmride="${encodeURIComponent(key)}">&times;</button></div>`;
   }).join('');
+  document.querySelectorAll('#rideList [data-rmride]').forEach(b=>b.onclick=async ()=>{
+    const key=decodeURIComponent(b.dataset.rmride);
+    const [date,title]=key.split('||');
+    const idx=state.rides.findIndex(r=>(r.date||'')===date && (r.title||'')===title);
+    if(idx===-1) return;
+    if(!confirm('Delete this activity?\n\n'+title+' ('+date+')')) return;
+    state.rides.splice(idx,1);
+    try{ localStorage.setItem(KEY, JSON.stringify(state)); }catch(e){}
+    try{ renderRides(); drawBalance(); }catch(e){ console.error(e); }
+    try{ await pushState('rides'); }catch(e){ alert('Deleted locally but cloud sync failed: '+e.message); }
+  });
 }
 
 let chkDate = todayKey();
@@ -786,12 +916,12 @@ function renderChecklist(){
     if(!state.checklist[tk]) state.checklist[tk]={done:{},custom:day.custom.slice()};
     if(!state.checklist[tk].done) state.checklist[tk].done={};
     state.checklist[tk].done[cb.dataset.chk]=cb.checked;
-    save(state); renderChecklist();
+    save(state,'daily_checklist'); renderChecklist();
   });
   wrap.querySelectorAll('[data-rmchk]').forEach(b=>b.onclick=(e)=>{
     e.preventDefault();
     state.checklist[tk].custom.splice(+b.dataset.rmchk,1);
-    save(state); renderChecklist();
+    save(state,'daily_checklist'); renderChecklist();
   });
 }
 
@@ -801,7 +931,7 @@ function addChecklistItem(text){
   if(!state.checklist[tk]) state.checklist[tk]={done:{},custom:[]};
   if(!state.checklist[tk].custom) state.checklist[tk].custom=[];
   state.checklist[tk].custom.push(text);
-  save(state); renderChecklist();
+  save(state,'daily_checklist'); renderChecklist();
 }
 
 function renderAll(){
@@ -827,7 +957,7 @@ document.getElementById('fAdd').onclick=()=>{
     state.saved.push({ name:item.name, kcal:item.kcal, p:item.p, c:item.c, f:item.f });
     document.getElementById('fSave').checked=false;
   }
-  save(state);
+  save(state,['food_items','saved_meals']);
   ['fName','fKcal','fP','fC','fF'].forEach(id=>document.getElementById(id).value='');
   renderFood(); renderSaved(); drawBalance(); drawMacros();
 };
@@ -840,7 +970,7 @@ document.getElementById('foodToday').onclick=()=>{ viewDate=todayKey(); renderFo
 // Baseline config
 document.getElementById('cfgSave').onclick=()=>{
   const v=parseInt(document.getElementById('cfgBaseline').value);
-  if(!isNaN(v)&&v>0){ state.config.baseline=v; save(state); renderFood(); drawBalance(); }
+  if(!isNaN(v)&&v>0){ state.config.baseline=v; save(state,'user_config'); renderFood(); drawBalance(); }
 };
 
 document.getElementById('mCheck').onclick=()=>{
@@ -882,37 +1012,49 @@ document.getElementById('planSave').onclick=()=>{
     state.plan[d]={ what:parts[1]||'', where:parts[2]||'' };
     n++;
   });
-  save(state); renderWeek(); renderChecklist();
+  save(state,'daily_plan'); renderWeek(); renderChecklist();
   document.getElementById('planPaste').value='';
   alert(n+' day'+(n===1?'':'s')+' loaded into the plan.');
 };
 document.getElementById('planClear').onclick=()=>{
-  if(confirm('Clear the entire plan?')){ state.plan={}; save(state); renderWeek(); renderChecklist(); }
+  if(confirm('Clear the entire plan?')){ state.plan={}; save(state,'daily_plan'); renderWeek(); renderChecklist(); }
 };
 
 // Paste meals: "name | calories | protein | carbs | fat" (protein/carbs/fat optional) — applies to viewDate
-document.getElementById('foodPasteSave').onclick=()=>{
+document.getElementById('foodPasteSave').onclick=async ()=>{
+  if(!state){ alert('Not signed in yet \u2014 wait for the app to finish loading.'); return; }
   const txt=document.getElementById('foodPaste').value.trim();
   if(!txt) return;
-  const tk=viewDate; if(!state.food[tk]) state.food[tk]={items:[]};
-  let n=0;
+  const dateRe=/^\d{4}-\d{2}-\d{2}$/;
+  const touched={}; let n=0;
   txt.split('\n').forEach(line=>{
-    const parts=line.split('|').map(x=>x.trim());
+    if(!line.trim()) return;
+    let parts=line.split('|').map(x=>x.trim());
+    // Optional leading date: if the first field is a YYYY-MM-DD, it sets the day
+    // for this line; otherwise the line lands on the currently-shown day.
+    let day=viewDate;
+    if(parts.length && dateRe.test(parts[0])){ day=parts.shift(); }
     const name=parts[0];
     if(!name) return;
-    state.food[tk].items.push({
+    if(!state.food[day]) state.food[day]={items:[]};
+    state.food[day].items.push({
       name,
       kcal: parseInt(parts[1])||0,
       p: parseInt(parts[2])||0,
       c: parseInt(parts[3])||0,
       f: parseInt(parts[4])||0
     });
-    n++;
+    touched[day]=(touched[day]||0)+1; n++;
   });
-  save(state);
-  document.getElementById('foodPaste').value='';
-  renderFood(); drawBalance(); drawMacros();
-  alert(n+' item'+(n===1?'':'s')+' added to '+prettyDate(tk)+'.');
+  try{ localStorage.setItem(KEY, JSON.stringify(state)); }catch(e){}
+  try{ renderFood(); drawBalance(); drawMacros(); }catch(e){ console.error(e); }
+  const days=Object.keys(touched).sort();
+  const breakdown = days.length===1
+    ? prettyDate(days[0])
+    : days.map(d=>d.slice(5)+' ('+touched[d]+')').join(', ');
+  try{ await pushState('food_items'); document.getElementById('foodPaste').value='';
+       alert(n+' item'+(n===1?'':'s')+' added \u2713 synced \u2014 '+breakdown); }
+  catch(e){ alert('Added locally but cloud sync FAILED: '+e.message); }
 };
 
 // Paste rides: "YYYY-MM-DD | title | duration | calories | notes" (calories optional)
@@ -934,48 +1076,99 @@ document.getElementById('ridePasteSave').onclick=()=>{
     n++;
   });
   state.rides.sort((a,b)=>a.date<b.date?1:-1);
-  save(state);
+  save(state,'rides');
   document.getElementById('ridePaste').value='';
   renderRides();
   alert(n+' ride'+(n===1?'':'s')+' added.');
 };
 
 // Weight logging
-document.getElementById('wAdd').onclick=()=>{
+document.getElementById('wAdd').onclick=async ()=>{
+  if(!state){ alert('Not signed in yet \u2014 wait for the app to finish loading, then try again.'); return; }
   const lb=parseFloat(document.getElementById('wLb').value);
   const d=document.getElementById('wDate').value || todayKey();
   if(isNaN(lb)||lb<=0){ alert('Enter a weight.'); return; }
+  if(!Array.isArray(state.weights)) state.weights=[];
   state.weights = state.weights.filter(w=>w.date!==d);
   state.weights.push({ date:d, lb });
-  save(state);
+  try{ localStorage.setItem(KEY, JSON.stringify(state)); }catch(e){}  // local save without triggering the debounced sync
   document.getElementById('wLb').value='';
-  renderStats(); draw(); renderWeightLast();
+  document.getElementById('wDate').value=todayKey();  // reset to today for the next entry
+  try{ renderStats(); draw(); renderWeightLast(); }catch(e){ console.error('render after weight save failed', e); }
+  // Await the actual DB write directly, so a test entry can't look saved
+  // locally while silently failing to sync.
+  const el=document.getElementById('wLast');
+  if(el){ el.style.color=''; el.textContent='Saving to cloud\u2026';
+    try{ await pushState('weights'); el.textContent='Saved '+lb.toFixed(1)+' lb on '+d+' \u2713 (synced to cloud)'; }
+    catch(e){ el.textContent='Saved locally but cloud sync FAILED: '+e.message; el.style.color='#e5484d'; return; }
+    setTimeout(renderWeightLast, 3000);
+  }
 };
 function renderWeightLast(){
   const el=document.getElementById('wLast'); if(!el) return;
   const w=latest(state.weights);
   const f=latest(state.ftp);
-  el.textContent = `Last logged: ${w.lb.toFixed(1)} lb on ${w.date} \u00b7 W/kg ${(f.w/(w.lb*LB2KG)).toFixed(2)}`;
+  if(!w){ el.textContent=''; return; }
+  el.textContent = f
+    ? `Last logged: ${w.lb.toFixed(1)} lb on ${w.date} \u00b7 W/kg ${(f.w/(w.lb*LB2KG)).toFixed(2)}`
+    : `Last logged: ${w.lb.toFixed(1)} lb on ${w.date}`;
 }
 
 // FTP logging
-document.getElementById('ftpAdd').onclick=()=>{
+document.getElementById('ftpAdd').onclick=async ()=>{
+  if(!state){ alert('Not signed in yet \u2014 wait for the app to finish loading, then try again.'); return; }
   const w=parseFloat(document.getElementById('ftpW').value);
   const d=document.getElementById('ftpDate').value || todayKey();
   const note=document.getElementById('ftpNote').value.trim() || null;
   if(isNaN(w)||w<=0){ alert('Enter an FTP value.'); return; }
+  if(!Array.isArray(state.ftp)) state.ftp=[];
   state.ftp = state.ftp.filter(f=>f.date!==d);
   state.ftp.push({ date:d, w, note });
-  save(state);
+  try{ localStorage.setItem(KEY, JSON.stringify(state)); }catch(e){}  // local save without the debounced sync
   document.getElementById('ftpW').value='';
   document.getElementById('ftpNote').value='';
-  renderStats(); draw(); renderWeightLast(); renderFtpLast();
+  document.getElementById('ftpDate').value=todayKey();  // reset for next entry
+  try{ renderStats(); draw(); renderWeightLast(); renderFtpLast(); }catch(e){ console.error('render after ftp save failed', e); }
+  const el=document.getElementById('ftpLast');
+  if(el){ el.style.color=''; el.textContent='Saving to cloud\u2026';
+    try{ await pushState('ftp_tests'); el.textContent='Saved '+w+' W on '+d+' \u2713 (synced to cloud)'; }
+    catch(e){ el.textContent='Saved locally but cloud sync FAILED: '+e.message; el.style.color='#e5484d'; return; }
+    setTimeout(renderFtpLast, 3000);
+  }
 };
 function renderFtpLast(){
   const el=document.getElementById('ftpLast'); if(!el) return;
   const f=latest(state.ftp);
+  if(!f){ el.textContent=''; return; }
   el.textContent = `Last logged: ${f.w} W on ${f.date}${f.note?' \u00b7 '+f.note:''}`;
 }
+
+// Paste FTP history: "YYYY-MM-DD | watts | note" (note optional)
+document.getElementById('ftpPasteSave').onclick=async ()=>{
+  const txt=document.getElementById('ftpPaste').value.trim();
+  const msg=document.getElementById('ftpPasteMsg');
+  if(!txt){ return; }
+  let n=0, skipped=0;
+  txt.split('\n').forEach(line=>{
+    if(!line.trim()) return;
+    const parts=line.split('|').map(x=>x.trim());
+    const d=parts[0];
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(d)){ skipped++; return; }
+    const w=parseInt(parts[1]);
+    if(isNaN(w)||w<=0){ skipped++; return; }
+    state.ftp = state.ftp.filter(f=>f.date!==d);   // one entry per date
+    state.ftp.push({ date:d, w, note: parts[2] || null });
+    n++;
+  });
+  state.ftp.sort((a,b)=>a.date<b.date?-1:1);
+  try{ localStorage.setItem(KEY, JSON.stringify(state)); }catch(e){}
+  renderStats(); draw(); renderWeightLast(); renderFtpLast();
+  if(msg){ msg.style.color=''; msg.textContent='Saving to cloud\u2026';
+    try{ await pushState('ftp_tests'); msg.style.color='var(--teal)'; msg.textContent=n+' test'+(n===1?'':'s')+' added and synced \u2713'+(skipped?' ('+skipped+' line'+(skipped===1?'':'s')+' skipped \u2014 bad format)':''); }
+    catch(e){ msg.style.color='#e5484d'; msg.textContent='Saved locally but cloud sync FAILED: '+e.message; return; }
+  }
+  document.getElementById('ftpPaste').value='';
+};
 
 document.getElementById('exportBtn').onclick=()=>{
   const blob=new Blob([JSON.stringify(state,null,2)],{type:'application/json'});
@@ -1091,8 +1284,10 @@ const authSubmitEl = document.getElementById('authSubmit');
 const authToggleEl = document.getElementById('authToggle');
 const authMsgEl = document.getElementById('authMsg');
 const authSubEl = document.getElementById('authSub');
+const authForgotEl = document.getElementById('authForgot');
 
 authToggleEl.onclick = () => {
+  if(authMode === 'reset') return;
   authMode = authMode === 'signin' ? 'signup' : 'signin';
   authSubmitEl.textContent = authMode === 'signin' ? 'Sign in' : 'Create account';
   authToggleEl.textContent = authMode === 'signin' ? 'Need an account? Sign up' : 'Already have an account? Sign in';
@@ -1100,7 +1295,31 @@ authToggleEl.onclick = () => {
   authMsgEl.textContent = '';
 };
 
+// Send a password-recovery email. Supabase redirects the link back to this same
+// page; onAuthStateChange fires PASSWORD_RECOVERY, which flips the form to "set
+// new password" mode below.
+authForgotEl.onclick = async () => {
+  const email = authEmailEl.value.trim();
+  if(!email){ authMsgEl.style.color = 'var(--amber)'; authMsgEl.textContent = 'Enter your email above first, then tap Forgot password.'; return; }
+  authForgotEl.style.pointerEvents = 'none';
+  const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin + window.location.pathname });
+  if(error){ authMsgEl.style.color = '#e5484d'; authMsgEl.textContent = error.message; }
+  else { authMsgEl.style.color = 'var(--teal)'; authMsgEl.textContent = 'Check your email for a reset link. Open it on this device.'; }
+  authForgotEl.style.pointerEvents = '';
+};
+
 authSubmitEl.onclick = async () => {
+  // Reset mode: the password field now holds the NEW password to set.
+  if(authMode === 'reset'){
+    const newPass = authPassEl.value;
+    if(!newPass || newPass.length < 6){ authMsgEl.style.color = 'var(--amber)'; authMsgEl.textContent = 'Enter a new password (at least 6 characters).'; return; }
+    authSubmitEl.disabled = true;
+    const { error } = await sb.auth.updateUser({ password: newPass });
+    if(error){ authMsgEl.style.color = '#e5484d'; authMsgEl.textContent = error.message; }
+    else { authMsgEl.style.color = 'var(--teal)'; authMsgEl.textContent = 'Password updated. You are signed in.'; }
+    authSubmitEl.disabled = false;
+    return;
+  }
   const email = authEmailEl.value.trim(), pass = authPassEl.value;
   if(!email || !pass){ authMsgEl.style.color = 'var(--amber)'; authMsgEl.textContent = 'Enter email and password.'; return; }
   authSubmitEl.disabled = true;
@@ -1115,10 +1334,28 @@ authSubmitEl.onclick = async () => {
   authSubmitEl.disabled = false;
 };
 
+// When the user arrives via the recovery email link, flip the form into a
+// "set a new password" state instead of dropping them straight into the app.
+function enterResetMode(){
+  authMode = 'reset';
+  showAuth();
+  authSubEl.textContent = 'Set a new password';
+  authEmailEl.style.display = 'none';
+  authEmailEl.previousElementSibling.style.display = 'none'; // its label
+  authPassEl.setAttribute('placeholder','New password');
+  authPassEl.setAttribute('autocomplete','new-password');
+  authSubmitEl.textContent = 'Update password';
+  authToggleEl.style.display = 'none';
+  authForgotEl.style.display = 'none';
+  authMsgEl.style.color = 'var(--text-dim)';
+  authMsgEl.textContent = 'Enter a new password below.';
+}
+
 document.getElementById('signOutBtn').onclick = () => sb.auth.signOut();
 
 sb.auth.onAuthStateChange((event, session) => {
-  if(event === 'SIGNED_IN'){ showApp(session.user.email); initApp(); }
+  if(event === 'PASSWORD_RECOVERY'){ enterResetMode(); return; }
+  if(event === 'SIGNED_IN'){ if(authMode==='reset') return; showApp(session.user.email); initApp(); }
   if(event === 'SIGNED_OUT'){ state = null; showAuth(); }
 });
 
