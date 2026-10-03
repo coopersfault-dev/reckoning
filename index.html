@@ -576,7 +576,6 @@ function archiveAndTrim(){
   Object.keys(state.food).forEach(key=>{
     const t = state.food[key].items ? state.food[key].items.reduce((a,i)=>({kcal:a.kcal+i.kcal,p:a.p+i.p,c:a.c+i.c,f:a.f+i.f}),{kcal:0,p:0,c:0,f:0}) : null;
     if(t) state.dailyTotals[key] = t;             // always keep totals for the graph
-    if(key < cutoff) delete state.food[key];       // drop item detail older than 7 days
   });
 }
 
