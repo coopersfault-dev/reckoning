@@ -408,6 +408,7 @@ function load() {
 // any two quick actions could overlap. The scheduler below guarantees that at
 // most one pushState is ever in flight, and coalesces bursts into a single write.
 let _syncTimer = null, _syncRunning = false, _syncQueued = false;
+let _dirty = null;   // Set of tables needing sync; null means "everything"
 
 function scheduleSync(){
   clearTimeout(_syncTimer);
@@ -417,19 +418,35 @@ function scheduleSync(){
 async function runSync(){
   if(_syncRunning){ _syncQueued = true; return; }   // fold into the current run
   _syncRunning = true;
+  const tables = _fullDirty ? null : (_dirty ? [..._dirty] : null);   // snapshot
+  _dirty = null; _fullDirty = false;
   try {
-    await pushState();
+    await pushState(tables);
   } catch(e){
-    // pushState now re-throws so awaited callers (e.g. the weight logger's
-    // verified save) can report failure. Background/debounced runs don't await,
-    // so we absorb it here to avoid unhandled rejections; the error is logged.
+    // pushState re-throws so awaited callers (e.g. the weight logger) can report
+    // failure. Background/debounced runs don't await, so we absorb here.
   } finally {
     _syncRunning = false;
     if(_syncQueued){ _syncQueued = false; scheduleSync(); }
   }
 }
 
-function save(s){ try{ localStorage.setItem(KEY, JSON.stringify(s)); }catch(e){} scheduleSync(); }
+// save(state) or save(state, 'weights'|['weights','ftp_tests']). Naming the
+// changed table(s) means a food edit only rewrites food_items and can never
+// overwrite an unrelated table (e.g. weights) with a stale in-memory copy.
+// Omitting the table forces a FULL sync (used by import). Across a debounce
+// burst, dirty tables accumulate; if any call omits the table, the whole
+// pending write upgrades to full.
+let _fullDirty = false;
+function save(s, table){
+  try{ localStorage.setItem(KEY, JSON.stringify(s)); }catch(e){}
+  if(table===undefined){ _fullDirty = true; _dirty = null; }
+  else if(!_fullDirty){
+    if(_dirty===null) _dirty = new Set();
+    (Array.isArray(table)?table:[table]).forEach(t=>_dirty.add(t));
+  }
+  scheduleSync();
+}
 
 // Don't let a queued write die with the tab.
 window.addEventListener('beforeunload', () => {
@@ -486,37 +503,53 @@ async function chk(label, q){
   return res;
 }
 
-async function pushState(){
+// pushState(only) writes just the named tables. This matters because every
+// write is still delete-all-then-reinsert for that table, so writing a table
+// you didn't change risks overwriting it with a stale in-memory copy. Logging
+// food should touch ONLY food_items; logging weight ONLY weights. Passing no
+// argument syncs everything (used for imports / full pushes).
+async function pushState(only){
   const { data: { user } } = await sb.auth.getUser();
   if(!user || !state) return;
   const uid = user.id;
+  const want = only ? (Array.isArray(only)?only:[only]) : null;
+  const doTable = t => !want || want.includes(t);
   try{
-    await chk('weights.delete', sb.from('weights').delete().eq('user_id', uid));
-    if(state.weights.length) await chk('weights.insert', sb.from('weights').insert(state.weights.map(w=>({user_id:uid,date:w.date,lb:w.lb}))));
-
-    await chk('ftp_tests.delete', sb.from('ftp_tests').delete().eq('user_id', uid));
-    if(state.ftp.length) await chk('ftp_tests.insert', sb.from('ftp_tests').insert(state.ftp.map(f=>({user_id:uid,date:f.date,watts:f.w,note:f.note||null}))));
-
-    await chk('rides.delete', sb.from('rides').delete().eq('user_id', uid));
-    if(state.rides.length) await chk('rides.insert', sb.from('rides').insert(state.rides.map(r=>({user_id:uid,date:r.date,title:r.title||null,ef:r.ef,vi:r.vi,type:r.type,z4min:r.z4min,z5min:r.z5min,surges:r.surges,kcal:r.kcal,burn_src:r.burnSrc,dur:r.dur,temp:r.temp,note:r.note}))));
-
-    const foodRows=[];
-    Object.keys(state.food).forEach(d=>{ (state.food[d].items||[]).forEach(it=>foodRows.push({user_id:uid,date:d,name:it.name,kcal:it.kcal,protein:it.p,carbs:it.c,fat:it.f})); });
-    await chk('food_items.delete', sb.from('food_items').delete().eq('user_id', uid));
-    if(foodRows.length) await chk('food_items.insert', sb.from('food_items').insert(foodRows));
-
-    await chk('saved_meals.delete', sb.from('saved_meals').delete().eq('user_id', uid));
-    if((state.saved||[]).length) await chk('saved_meals.insert', sb.from('saved_meals').insert(state.saved.map(m=>({user_id:uid,name:m.name,kcal:m.kcal,protein:m.p,carbs:m.c,fat:m.f}))));
-
-    await chk('daily_checklist.delete', sb.from('daily_checklist').delete().eq('user_id', uid));
-    const chkRows = Object.keys(state.checklist).map(d=>({user_id:uid,date:d,done:state.checklist[d].done||{},custom:state.checklist[d].custom||[]}));
-    if(chkRows.length) await chk('daily_checklist.insert', sb.from('daily_checklist').insert(chkRows));
-
-    await chk('daily_plan.delete', sb.from('daily_plan').delete().eq('user_id', uid));
-    const planRows = Object.keys(state.plan).map(d=>({user_id:uid,date:d,what:state.plan[d].what||null,where_:state.plan[d].where||null}));
-    if(planRows.length) await chk('daily_plan.insert', sb.from('daily_plan').insert(planRows));
-
-    await chk('user_config.upsert', sb.from('user_config').upsert({user_id:uid, baseline:state.config.baseline, weight_lb:state.config.weightLb, age:state.config.age}));
+    if(doTable('weights')){
+      await chk('weights.delete', sb.from('weights').delete().eq('user_id', uid));
+      if(state.weights.length) await chk('weights.insert', sb.from('weights').insert(state.weights.map(w=>({user_id:uid,date:w.date,lb:w.lb}))));
+    }
+    if(doTable('ftp_tests')){
+      await chk('ftp_tests.delete', sb.from('ftp_tests').delete().eq('user_id', uid));
+      if(state.ftp.length) await chk('ftp_tests.insert', sb.from('ftp_tests').insert(state.ftp.map(f=>({user_id:uid,date:f.date,watts:f.w,note:f.note||null}))));
+    }
+    if(doTable('rides')){
+      await chk('rides.delete', sb.from('rides').delete().eq('user_id', uid));
+      if(state.rides.length) await chk('rides.insert', sb.from('rides').insert(state.rides.map(r=>({user_id:uid,date:r.date,title:r.title||null,ef:r.ef,vi:r.vi,type:r.type,z4min:r.z4min,z5min:r.z5min,surges:r.surges,kcal:r.kcal,burn_src:r.burnSrc,dur:r.dur,temp:r.temp,note:r.note}))));
+    }
+    if(doTable('food_items')){
+      const foodRows=[];
+      Object.keys(state.food).forEach(d=>{ (state.food[d].items||[]).forEach(it=>foodRows.push({user_id:uid,date:d,name:it.name,kcal:it.kcal,protein:it.p,carbs:it.c,fat:it.f})); });
+      await chk('food_items.delete', sb.from('food_items').delete().eq('user_id', uid));
+      if(foodRows.length) await chk('food_items.insert', sb.from('food_items').insert(foodRows));
+    }
+    if(doTable('saved_meals')){
+      await chk('saved_meals.delete', sb.from('saved_meals').delete().eq('user_id', uid));
+      if((state.saved||[]).length) await chk('saved_meals.insert', sb.from('saved_meals').insert(state.saved.map(m=>({user_id:uid,name:m.name,kcal:m.kcal,protein:m.p,carbs:m.c,fat:m.f}))));
+    }
+    if(doTable('daily_checklist')){
+      await chk('daily_checklist.delete', sb.from('daily_checklist').delete().eq('user_id', uid));
+      const chkRows = Object.keys(state.checklist).map(d=>({user_id:uid,date:d,done:state.checklist[d].done||{},custom:state.checklist[d].custom||[]}));
+      if(chkRows.length) await chk('daily_checklist.insert', sb.from('daily_checklist').insert(chkRows));
+    }
+    if(doTable('daily_plan')){
+      await chk('daily_plan.delete', sb.from('daily_plan').delete().eq('user_id', uid));
+      const planRows = Object.keys(state.plan).map(d=>({user_id:uid,date:d,what:state.plan[d].what||null,where_:state.plan[d].where||null}));
+      if(planRows.length) await chk('daily_plan.insert', sb.from('daily_plan').insert(planRows));
+    }
+    if(doTable('user_config')){
+      await chk('user_config.upsert', sb.from('user_config').upsert({user_id:uid, baseline:state.config.baseline, weight_lb:state.config.weightLb, age:state.config.age}));
+    }
   }catch(e){ console.error('Supabase sync failed', e); throw e; }
 }
 
@@ -777,7 +810,7 @@ function renderFood(){
     list.innerHTML = items.map((it,i)=>`<div class="item"><div><div class="t">${it.name}</div>
       <div class="m">${it.kcal} kcal &middot; ${it.p}p ${it.c}c ${it.f}f</div></div>
       <button class="del" data-fd="${i}">&times;</button></div>`).join('');
-    list.querySelectorAll('[data-fd]').forEach(b=>b.onclick=()=>{ state.food[tk].items.splice(+b.dataset.fd,1); save(state); renderFood(); drawBalance(); drawMacros(); });
+    list.querySelectorAll('[data-fd]').forEach(b=>b.onclick=()=>{ state.food[tk].items.splice(+b.dataset.fd,1); save(state,'food_items'); renderFood(); drawBalance(); drawMacros(); });
   }
 }
 
@@ -793,10 +826,10 @@ function renderSaved(){
     const m = state.saved[+b.dataset.add]; const tk=viewDate;
     if(!state.food[tk]) state.food[tk]={items:[]};
     state.food[tk].items.push({ name:m.name, kcal:m.kcal, p:m.p, c:m.c, f:m.f });
-    save(state); renderFood(); drawBalance(); drawMacros();
+    save(state,'food_items'); renderFood(); drawBalance(); drawMacros();
   });
   wrap.querySelectorAll('[data-rm]').forEach(b=>b.onclick=()=>{
-    if(confirm('Remove this saved meal?')){ state.saved.splice(+b.dataset.rm,1); save(state); renderSaved(); }
+    if(confirm('Remove this saved meal?')){ state.saved.splice(+b.dataset.rm,1); save(state,'saved_meals'); renderSaved(); }
   });
 }
 
@@ -825,7 +858,7 @@ function renderRides(){
     state.rides.splice(idx,1);
     try{ localStorage.setItem(KEY, JSON.stringify(state)); }catch(e){}
     try{ renderRides(); drawBalance(); }catch(e){ console.error(e); }
-    try{ await pushState(); }catch(e){ alert('Deleted locally but cloud sync failed: '+e.message); }
+    try{ await pushState('rides'); }catch(e){ alert('Deleted locally but cloud sync failed: '+e.message); }
   });
 }
 
@@ -883,12 +916,12 @@ function renderChecklist(){
     if(!state.checklist[tk]) state.checklist[tk]={done:{},custom:day.custom.slice()};
     if(!state.checklist[tk].done) state.checklist[tk].done={};
     state.checklist[tk].done[cb.dataset.chk]=cb.checked;
-    save(state); renderChecklist();
+    save(state,'daily_checklist'); renderChecklist();
   });
   wrap.querySelectorAll('[data-rmchk]').forEach(b=>b.onclick=(e)=>{
     e.preventDefault();
     state.checklist[tk].custom.splice(+b.dataset.rmchk,1);
-    save(state); renderChecklist();
+    save(state,'daily_checklist'); renderChecklist();
   });
 }
 
@@ -898,7 +931,7 @@ function addChecklistItem(text){
   if(!state.checklist[tk]) state.checklist[tk]={done:{},custom:[]};
   if(!state.checklist[tk].custom) state.checklist[tk].custom=[];
   state.checklist[tk].custom.push(text);
-  save(state); renderChecklist();
+  save(state,'daily_checklist'); renderChecklist();
 }
 
 function renderAll(){
@@ -924,7 +957,7 @@ document.getElementById('fAdd').onclick=()=>{
     state.saved.push({ name:item.name, kcal:item.kcal, p:item.p, c:item.c, f:item.f });
     document.getElementById('fSave').checked=false;
   }
-  save(state);
+  save(state,['food_items','saved_meals']);
   ['fName','fKcal','fP','fC','fF'].forEach(id=>document.getElementById(id).value='');
   renderFood(); renderSaved(); drawBalance(); drawMacros();
 };
@@ -937,7 +970,7 @@ document.getElementById('foodToday').onclick=()=>{ viewDate=todayKey(); renderFo
 // Baseline config
 document.getElementById('cfgSave').onclick=()=>{
   const v=parseInt(document.getElementById('cfgBaseline').value);
-  if(!isNaN(v)&&v>0){ state.config.baseline=v; save(state); renderFood(); drawBalance(); }
+  if(!isNaN(v)&&v>0){ state.config.baseline=v; save(state,'user_config'); renderFood(); drawBalance(); }
 };
 
 document.getElementById('mCheck').onclick=()=>{
@@ -979,12 +1012,12 @@ document.getElementById('planSave').onclick=()=>{
     state.plan[d]={ what:parts[1]||'', where:parts[2]||'' };
     n++;
   });
-  save(state); renderWeek(); renderChecklist();
+  save(state,'daily_plan'); renderWeek(); renderChecklist();
   document.getElementById('planPaste').value='';
   alert(n+' day'+(n===1?'':'s')+' loaded into the plan.');
 };
 document.getElementById('planClear').onclick=()=>{
-  if(confirm('Clear the entire plan?')){ state.plan={}; save(state); renderWeek(); renderChecklist(); }
+  if(confirm('Clear the entire plan?')){ state.plan={}; save(state,'daily_plan'); renderWeek(); renderChecklist(); }
 };
 
 // Paste meals: "name | calories | protein | carbs | fat" (protein/carbs/fat optional) — applies to viewDate
@@ -1019,7 +1052,7 @@ document.getElementById('foodPasteSave').onclick=async ()=>{
   const breakdown = days.length===1
     ? prettyDate(days[0])
     : days.map(d=>d.slice(5)+' ('+touched[d]+')').join(', ');
-  try{ await pushState(); document.getElementById('foodPaste').value='';
+  try{ await pushState('food_items'); document.getElementById('foodPaste').value='';
        alert(n+' item'+(n===1?'':'s')+' added \u2713 synced \u2014 '+breakdown); }
   catch(e){ alert('Added locally but cloud sync FAILED: '+e.message); }
 };
@@ -1043,7 +1076,7 @@ document.getElementById('ridePasteSave').onclick=()=>{
     n++;
   });
   state.rides.sort((a,b)=>a.date<b.date?1:-1);
-  save(state);
+  save(state,'rides');
   document.getElementById('ridePaste').value='';
   renderRides();
   alert(n+' ride'+(n===1?'':'s')+' added.');
@@ -1066,7 +1099,7 @@ document.getElementById('wAdd').onclick=async ()=>{
   // locally while silently failing to sync.
   const el=document.getElementById('wLast');
   if(el){ el.style.color=''; el.textContent='Saving to cloud\u2026';
-    try{ await pushState(); el.textContent='Saved '+lb.toFixed(1)+' lb on '+d+' \u2713 (synced to cloud)'; }
+    try{ await pushState('weights'); el.textContent='Saved '+lb.toFixed(1)+' lb on '+d+' \u2713 (synced to cloud)'; }
     catch(e){ el.textContent='Saved locally but cloud sync FAILED: '+e.message; el.style.color='#e5484d'; return; }
     setTimeout(renderWeightLast, 3000);
   }
@@ -1098,7 +1131,7 @@ document.getElementById('ftpAdd').onclick=async ()=>{
   try{ renderStats(); draw(); renderWeightLast(); renderFtpLast(); }catch(e){ console.error('render after ftp save failed', e); }
   const el=document.getElementById('ftpLast');
   if(el){ el.style.color=''; el.textContent='Saving to cloud\u2026';
-    try{ await pushState(); el.textContent='Saved '+w+' W on '+d+' \u2713 (synced to cloud)'; }
+    try{ await pushState('ftp_tests'); el.textContent='Saved '+w+' W on '+d+' \u2713 (synced to cloud)'; }
     catch(e){ el.textContent='Saved locally but cloud sync FAILED: '+e.message; el.style.color='#e5484d'; return; }
     setTimeout(renderFtpLast, 3000);
   }
@@ -1131,7 +1164,7 @@ document.getElementById('ftpPasteSave').onclick=async ()=>{
   try{ localStorage.setItem(KEY, JSON.stringify(state)); }catch(e){}
   renderStats(); draw(); renderWeightLast(); renderFtpLast();
   if(msg){ msg.style.color=''; msg.textContent='Saving to cloud\u2026';
-    try{ await pushState(); msg.style.color='var(--teal)'; msg.textContent=n+' test'+(n===1?'':'s')+' added and synced \u2713'+(skipped?' ('+skipped+' line'+(skipped===1?'':'s')+' skipped \u2014 bad format)':''); }
+    try{ await pushState('ftp_tests'); msg.style.color='var(--teal)'; msg.textContent=n+' test'+(n===1?'':'s')+' added and synced \u2713'+(skipped?' ('+skipped+' line'+(skipped===1?'':'s')+' skipped \u2014 bad format)':''); }
     catch(e){ msg.style.color='#e5484d'; msg.textContent='Saved locally but cloud sync FAILED: '+e.message; return; }
   }
   document.getElementById('ftpPaste').value='';
