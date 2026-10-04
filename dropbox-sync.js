@@ -395,4 +395,15 @@ async function boot(){
   else msg('Connect once on each device to import rides automatically.');
 }
 boot();
+
+// Read-only access for ride-export.js: the parsed .fit file for a Wahoo stamp.
+let fileList = null;
+async function fitForStamp(stamp){
+  if(!lsGet(LS_REFRESH)) throw new Error('Dropbox is not connected on this device. Use Connect Dropbox in the Wahoo box first.');
+  let f = (fileList || (fileList = await listFitFiles())).find(x => x.name.startsWith(stamp));
+  if(!f){ fileList = await listFitFiles(); f = fileList.find(x => x.name.startsWith(stamp)); }
+  if(!f) throw new Error('No file starting ' + stamp + ' in ' + DBX_FOLDER);
+  return parseFit(await downloadFile(f));
+}
+window.reckoningDropbox = { fitForStamp };
 })();
