@@ -396,14 +396,18 @@ async function boot(){
 }
 boot();
 
-// Read-only access for ride-export.js: the parsed .fit file for a Wahoo stamp.
+// Read-only access for ride-export.js: the .fit file for a Wahoo stamp, raw
+// ({ name, buf }) or parsed. Downloads are kept for the page's lifetime.
 let fileList = null;
-async function fitForStamp(stamp){
+const fileCache = {};
+async function fitFileForStamp(stamp){
+  if(fileCache[stamp]) return fileCache[stamp];
   if(!lsGet(LS_REFRESH)) throw new Error('Dropbox is not connected on this device. Use Connect Dropbox in the Wahoo box first.');
   let f = (fileList || (fileList = await listFitFiles())).find(x => x.name.startsWith(stamp));
   if(!f){ fileList = await listFitFiles(); f = fileList.find(x => x.name.startsWith(stamp)); }
   if(!f) throw new Error('No file starting ' + stamp + ' in ' + DBX_FOLDER);
-  return parseFit(await downloadFile(f));
+  return (fileCache[stamp] = { name: f.name, buf: await downloadFile(f) });
 }
-window.reckoningDropbox = { fitForStamp };
+async function fitForStamp(stamp){ return parseFit((await fitFileForStamp(stamp)).buf); }
+window.reckoningDropbox = { fitForStamp, fitFileForStamp };
 })();

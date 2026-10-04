@@ -187,7 +187,177 @@ function storedDigest(r, source){
     (r.note ? 'Note: ' + r.note + '\n' : '');
 }
 
-if(typeof module !== 'undefined' && module.exports){ module.exports = { fitDigest, storedDigest, perSecond, bestAvg, normalized }; }
+// ---------------------------------------------------------------- full ride (CSV)
+// Decodes every field of every record message, not just the ones the
+// importer needs, plus laps and developer-field names. Nothing is averaged,
+// smoothed or dropped: one CSV row per record message in the file.
+
+// Base type (low 5 bits) -> [byte size, invalid value or null]
+const BASE = { 0: [1, 0xFF], 1: [1, 0x7F], 2: [1, 0xFF], 3: [2, 0x7FFF], 4: [2, 0xFFFF], 5: [4, 0x7FFFFFFF],
+  6: [4, 0xFFFFFFFF], 7: [1, null], 8: [4, null], 9: [8, null], 10: [1, 0], 11: [2, 0], 12: [4, 0], 13: [1, 0xFF],
+  14: [8, null], 15: [8, null], 16: [8, null] };
+function readOne(dv, p, t, le){
+  switch(t){
+    case 0: case 2: case 10: case 13: return dv.getUint8(p);
+    case 1: return dv.getInt8(p);
+    case 3: return dv.getInt16(p, le);
+    case 4: case 11: return dv.getUint16(p, le);
+    case 5: return dv.getInt32(p, le);
+    case 6: case 12: return dv.getUint32(p, le);
+    case 8: return dv.getFloat32(p, le);
+    case 9: return dv.getFloat64(p, le);
+    case 14: { const v = dv.getBigInt64(p, le); return v === 0x7FFFFFFFFFFFFFFFn ? null : Number(v); }
+    case 15: { const v = dv.getBigUint64(p, le); return v === 0xFFFFFFFFFFFFFFFFn ? null : Number(v); }
+    case 16: { const v = dv.getBigUint64(p, le); return v === 0n ? null : Number(v); }
+  }
+  return null;
+}
+// One field's value: a number, a string, an array of numbers, or null if invalid.
+function readField(dv, p, size, type, le){
+  const t = type & 0x1F, b = BASE[t];
+  if(!b) return null;
+  if(t === 7){
+    let s = ''; const bytes = [];
+    for(let i = 0; i < size; i++){ const c = dv.getUint8(p + i); if(!c) break; bytes.push(c); }
+    try{ s = new TextDecoder().decode(new Uint8Array(bytes)); }catch(e){ s = String.fromCharCode(...bytes); }
+    return s || null;
+  }
+  const n = Math.floor(size / b[0]);
+  if(n < 1) return null;
+  const vals = [];
+  for(let i = 0; i < n; i++){
+    let v = readOne(dv, p + i * b[0], t, le);
+    if(v !== null && ((b[1] !== null && v === b[1]) || ((t === 8 || t === 9) && isNaN(v)))) v = null;
+    vals.push(v);
+  }
+  if(n === 1) return vals[0];
+  return vals.every(v => v === null) ? null : vals;
+}
+
+function decodeFull(buf){
+  const dv = new DataView(buf);
+  if(buf.byteLength < 14) throw new Error('file too small to be a FIT file');
+  const hs = dv.getUint8(0);
+  if(String.fromCharCode(dv.getUint8(8), dv.getUint8(9), dv.getUint8(10), dv.getUint8(11)) !== '.FIT') throw new Error('not a FIT file');
+  const end = Math.min(buf.byteLength, hs + dv.getUint32(4, true));
+  const defs = {}, records = [], laps = [], devDesc = {};
+  let p = hs, lastTs = 0;
+  while(p < end){
+    const h = dv.getUint8(p++);
+    let def, compressedOff = null;
+    if(h & 0x80){ def = defs[(h >> 5) & 3]; compressedOff = h & 0x1F; }
+    else if(h & 0x40){
+      const lt = h & 0x0F, hasDev = h & 0x20;
+      p++;                                           // reserved
+      const le = dv.getUint8(p++) === 0;
+      const g = dv.getUint16(p, le); p += 2;
+      const n = dv.getUint8(p++);
+      const fields = [], dev = []; let size = 0;
+      for(let i = 0; i < n; i++){ fields.push({ num: dv.getUint8(p), size: dv.getUint8(p+1), type: dv.getUint8(p+2) }); size += dv.getUint8(p+1); p += 3; }
+      if(hasDev){
+        const nd = dv.getUint8(p++);
+        for(let i = 0; i < nd; i++){ dev.push({ num: dv.getUint8(p), size: dv.getUint8(p+1), idx: dv.getUint8(p+2) }); size += dv.getUint8(p+1); p += 3; }
+      }
+      defs[lt] = { g, le, fields, dev, size };
+      continue;
+    } else { def = defs[h & 0x0F]; }
+    if(!def) throw new Error('corrupt FIT file (data before definition)');
+    if(p + def.size > end) break;                    // truncated tail; keep what we have
+    const m = {}; let q = p;
+    for(const f of def.fields){ m[f.num] = readField(dv, q, f.size, f.type, def.le); q += f.size; }
+    const devVals = {};
+    for(const f of def.dev){
+      const d = devDesc[f.idx + ':' + f.num];
+      devVals[f.idx + ':' + f.num] = d ? readField(dv, q, f.size, d.type, def.le) : null;
+      q += f.size;
+    }
+    if(compressedOff !== null){
+      let ts = (lastTs & ~0x1F) + compressedOff;
+      if(compressedOff < (lastTs & 0x1F)) ts += 32;
+      m[253] = ts;
+    }
+    if(typeof m[253] === 'number') lastTs = m[253];
+    if(def.g === 20){ m._dev = devVals; records.push(m); }
+    else if(def.g === 19) laps.push({ start: m[2], end: m[253] });
+    else if(def.g === 206 && typeof m[0] === 'number' && typeof m[1] === 'number')
+      devDesc[m[0] + ':' + m[1]] = { type: m[2] || 0, name: m[3] || ('dev_' + m[0] + '_' + m[1]), units: m[8] || '' };
+    p += def.size;
+  }
+  return { records, laps, devDesc };
+}
+
+// Record fields with a known meaning: [column, scale, offset]. Positions are
+// semicircles, converted to degrees. Anything else goes out raw as field_<n>.
+const REC = {
+  7: ['power_w'], 3: ['heart_rate_bpm'], 4: ['cadence_rpm'], 53: ['fractional_cadence_rpm', 128],
+  6: ['speed_m_s', 1000], 73: ['enhanced_speed_m_s', 1000], 5: ['distance_m', 100],
+  2: ['altitude_m', 5, 500], 78: ['enhanced_altitude_m', 5, 500], 13: ['temperature_c'], 9: ['grade_pct', 100],
+  0: ['lat_deg'], 1: ['long_deg'], 32: ['vertical_speed_m_s', 1000], 29: ['accumulated_power_j'],
+  30: ['left_right_balance_raw'], 31: ['gps_accuracy_m'], 33: ['calories_kcal'],
+  43: ['left_torque_effectiveness_pct', 2], 44: ['right_torque_effectiveness_pct', 2],
+  45: ['left_pedal_smoothness_pct', 2], 46: ['right_pedal_smoothness_pct', 2], 47: ['combined_pedal_smoothness_pct', 2]
+};
+const SEMI = 180 / 2147483648;
+function scaled(num, v){
+  if(v === null || v === undefined) return '';
+  if(Array.isArray(v)) return v.map(x => x === null ? '' : x).join('|');
+  if(typeof v !== 'number') return v;
+  if(num === 0 || num === 1) return (v * SEMI).toFixed(7);
+  const k = REC[num];
+  if(!k || !k[1]) return String(v);
+  return String(+((v / k[1]) - (k[2] || 0)).toFixed(7));
+}
+function csvCell(x){ x = String(x); return /[",\n\r]/.test(x) ? '"' + x.replace(/"/g, '""') + '"' : x; }
+function pad2(n){ return String(n).padStart(2, '0'); }
+
+function rideCsv(buf){
+  const { records, laps, devDesc } = decodeFull(buf);
+  if(!records.length) throw new Error('no per-second records in the file');
+  const present = new Set(), devPresent = new Set();
+  records.forEach(r => {
+    Object.keys(r).forEach(k => { if(k !== '_dev' && k !== '253' && r[k] !== null) present.add(+k); });
+    Object.keys(r._dev).forEach(k => { if(r._dev[k] !== null) devPresent.add(k); });
+  });
+  const order = Object.keys(REC).map(Number);
+  const cols = order.filter(n => present.has(n)).concat([...present].filter(n => !REC[n]).sort((a, b) => a - b));
+  const devCols = [...devPresent].sort();
+  const header = ['timestamp_utc', 'time_local', 'elapsed_s', 'lap', 'lap_start']
+    .concat(cols.map(n => REC[n] ? REC[n][0] : 'field_' + n))
+    .concat(devCols.map(k => 'dev_' + devDesc[k].name.replace(/\W+/g, '_') + (devDesc[k].units ? '_' + devDesc[k].units.replace(/\W+/g, '_') : '')));
+
+  const lapStarts = laps.map(l => l.start).filter(x => typeof x === 'number').sort((a, b) => a - b);
+  const t0 = records.find(r => typeof r[253] === 'number');
+  const first = t0 ? t0[253] : null;
+  const lines = [header.join(',')];
+  let lastLap = 0;
+  records.forEach(r => {
+    const ts = typeof r[253] === 'number' ? r[253] : null;
+    let utc = '', local = '', el = '', lap = '', lapStart = '';
+    if(ts !== null){
+      const d = new Date((ts + FIT_EPOCH) * 1000);
+      utc = d.toISOString().replace('.000Z', 'Z');
+      local = pad2(d.getHours()) + ':' + pad2(d.getMinutes()) + ':' + pad2(d.getSeconds());
+      el = ts - first;
+      if(lapStarts.length){
+        let n = 0; for(const s of lapStarts){ if(s <= ts) n++; }
+        lap = Math.max(1, n);
+        if(lap !== lastLap){ lapStart = 1; lastLap = lap; }
+      }
+    }
+    lines.push([utc, local, el, lap, lapStart]
+      .concat(cols.map(n => scaled(n, r[n])))
+      .concat(devCols.map(k => scaled(-1, r._dev[k])))
+      .map(csvCell).join(','));
+  });
+  return { text: lines.join('\n') + '\n', rows: records.length, columns: header.length, laps: lapStarts.length };
+}
+
+function fileBase(ride){
+  const slug = String(ride.title || 'ride').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'ride';
+  return ride.date + '-' + slug;
+}
+
+if(typeof module !== 'undefined' && module.exports){ module.exports = { fitDigest, storedDigest, perSecond, bestAvg, normalized, decodeFull, rideCsv, fileBase }; }
 if(typeof document === 'undefined') return;
 
 // ---------------------------------------------------------------- page data
@@ -236,8 +406,9 @@ function lastTwoWeeks(){
 }
 
 // ---------------------------------------------------------------- UI
-// The text goes in a box with its own Copy button: on iOS Safari a clipboard
-// write only works directly inside a tap, not after waiting on a download.
+// Results go in a box with their own Copy button or Save link: on iOS Safari a
+// clipboard write or download only works directly inside a tap, not after
+// waiting on Dropbox.
 function panel(host){
   let box = host.querySelector(':scope > .rxPanel');
   if(box) return box;
@@ -247,20 +418,36 @@ function panel(host){
   box.innerHTML =
     '<p class="hint rxMsg" style="margin:0 0 6px;"></p>' +
     '<textarea class="rxText" readonly rows="12" style="display:none;width:100%;font-family:ui-monospace,Menlo,monospace;font-size:12px;background:var(--surface-2);border:0.5px solid var(--border);border-radius:8px;padding:8px;color:var(--text);"></textarea>' +
-    '<div style="display:flex;gap:8px;margin-top:6px;">' +
+    '<div style="display:flex;gap:8px;margin-top:6px;align-items:center;">' +
       '<button class="rxCopy primary" style="display:none;width:auto;padding:5px 14px;font-size:13px;">Copy</button>' +
+      '<a class="rxSave" style="display:none;background:var(--blue);color:#fff;border-radius:8px;padding:5px 14px;font-size:13px;text-decoration:none;"></a>' +
       '<button class="rxClose" style="width:auto;padding:5px 14px;font-size:13px;">Close</button>' +
     '</div>';
   host.appendChild(box);
-  box.querySelector('.rxClose').onclick = () => box.remove();
+  box.querySelector('.rxClose').onclick = () => { clearSave(box); box.remove(); };
   box.querySelector('.rxCopy').onclick = () => copyFrom(box);
   return box;
 }
 function say(box, text, color){ const m = box.querySelector('.rxMsg'); m.textContent = text; m.style.color = color || ''; }
+function clearSave(box){
+  const a = box.querySelector('.rxSave');
+  if(a.href) URL.revokeObjectURL(a.href);
+  a.removeAttribute('href'); a.style.display = 'none';
+}
 function show(box, text){
+  clearSave(box);
   const ta = box.querySelector('.rxText');
   ta.value = text; ta.style.display = '';
   box.querySelector('.rxCopy').style.display = '';
+}
+function offerFile(box, blob, name){
+  clearSave(box);
+  box.querySelector('.rxText').style.display = 'none';
+  box.querySelector('.rxCopy').style.display = 'none';
+  const a = box.querySelector('.rxSave');
+  a.href = URL.createObjectURL(blob); a.download = name;
+  a.textContent = 'Save ' + name + ' (' + (blob.size >= 1048576 ? (blob.size / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(blob.size / 1024)) + ' KB') + ')';
+  a.style.display = '';
 }
 function copyFrom(box){
   const ta = box.querySelector('.rxText');
@@ -294,19 +481,54 @@ async function rideDigest(btn, host, ride){
   }finally{ btn.disabled = false; }
 }
 
+// kind 'csv': every record in the file as CSV. kind 'fit': the original file, byte for byte.
+async function rideFile(btn, host, ride, stamp, kind){
+  const box = panel(host);
+  clearSave(box);
+  box.querySelector('.rxText').style.display = 'none';
+  box.querySelector('.rxCopy').style.display = 'none';
+  btn.disabled = true;
+  say(box, 'Downloading the ride file from Dropbox…');
+  try{
+    if(!window.reckoningDropbox || !window.reckoningDropbox.fitFileForStamp) throw new Error('the Dropbox script did not load');
+    const file = await window.reckoningDropbox.fitFileForStamp(stamp);
+    if(kind === 'fit'){
+      offerFile(box, new Blob([file.buf], { type: 'application/octet-stream' }), fileBase(ride) + '.fit');
+      say(box, 'Original file from Dropbox (' + file.name + '), unchanged. Tap Save.');
+    } else {
+      say(box, 'Building the CSV…');
+      const csv = rideCsv(file.buf);
+      offerFile(box, new Blob([csv.text], { type: 'text/csv' }), fileBase(ride) + '.csv');
+      say(box, csv.rows.toLocaleString() + ' rows × ' + csv.columns + ' columns' + (csv.laps ? ', ' + csv.laps + ' lap' + (csv.laps === 1 ? '' : 's') : '') + '. Tap Save.');
+    }
+  }catch(e){
+    say(box, 'Could not prepare the ' + (kind === 'fit' ? '.fit file' : 'CSV') + ': ' + e.message, RED);
+  }finally{ btn.disabled = false; }
+}
+
+function smallBtn(label, onclick){
+  const b = document.createElement('button');
+  b.className = 'rxBtn'; b.textContent = label;
+  b.style.cssText = 'width:auto;padding:3px 10px;font-size:12px;';
+  b.onclick = () => onclick(b);
+  return b;
+}
 function decorate(){
   const list = document.getElementById('rideList');
   if(!list || !state) return;
   const rides = sortByDate(state.rides || [], 'desc');   // same order renderRides() uses
   [...list.children].forEach((item, i) => {
-    const ride = rides[i], host = item.firstElementChild;
+    const ride = rides[i], host = item.querySelector('.rideDetail') || item.firstElementChild;
     if(!ride || !host || host.querySelector('.rxBtn')) return;
-    const b = document.createElement('button');
-    b.className = 'rxBtn';
-    b.textContent = 'Copy for Claude';
-    b.style.cssText = 'width:auto;padding:3px 10px;font-size:12px;margin-top:6px;';
-    b.onclick = () => rideDigest(b, host, ride);
-    host.appendChild(b);
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;';
+    row.appendChild(smallBtn('Copy summary', b => rideDigest(b, host, ride)));
+    const m = (ride.note || '').match(STAMP_IN_NOTE);
+    if(m){
+      row.appendChild(smallBtn('Download full ride', b => rideFile(b, host, ride, m[1], 'csv')));
+      row.appendChild(smallBtn('Download .fit', b => rideFile(b, host, ride, m[1], 'fit')));
+    }
+    host.appendChild(row);
   });
 }
 

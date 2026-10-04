@@ -57,6 +57,14 @@
   .item .t { font-size: 14px; }
   .item .m { font-size: 12px; color: var(--text-mute); margin-top: 2px; }
   .del { width: auto; padding: 4px 9px; font-size: 12px; background: transparent; border-color: var(--border); color: var(--text-dim); }
+  #rideList { max-height: 330px; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+  .rideHead { display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 14px; min-width: 0; }
+  .rideHead .rt { flex: 1; min-width: 0; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .rideRow.open .rideHead .rt { white-space: normal; }
+  .rideHead .rd, .rideHead .rdur { font-size: 12px; color: var(--text-mute); white-space: nowrap; }
+  .rideHead::after { content: "+"; color: var(--text-dim); }
+  .rideRow.open .rideHead::after { content: "\2212"; }
+  .rideRow:not(.open) .rideDetail, .rideRow:not(.open) .del { display: none; }
   table { width: 100%; border-collapse: collapse; font-size: 13px; }
   th { text-align: left; font-weight: 500; color: var(--text-dim); padding: 6px 4px; }
   td { padding: 6px 4px; border-top: 0.5px solid var(--border); }
@@ -832,6 +840,8 @@ function renderSaved(){
   });
 }
 
+// Rides expanded in the log, kept open across redraws.
+const openRides = new Set();
 function renderRides(){
   document.getElementById('logCount').textContent = '('+state.rides.length+')';
   document.getElementById('rideList').innerHTML = sortByDate(state.rides,'desc').map(r=>{
@@ -842,12 +852,19 @@ function renderRides(){
     const flag = rc ? `<span style="font-size:10px;color:${rc.color};border:0.5px solid ${rc.color};border-radius:4px;padding:1px 5px;margin-left:6px;">${rc.flag}</span>` : '';
     const rcLine = rc ? `<div class="m" style="color:${rc.color};">${rc.msg} <span style="color:var(--text-mute);">(${rc.why})</span></div>` : '';
     const key = (r.date||'')+'||'+(r.title||'');
-    return `<div class="item"><div style="flex:1;"><div class="t" style="font-weight:500;">${r.title} <span style="font-size:12px;color:var(--text-mute);font-weight:400;">${r.date}</span>${badge}${flag}</div>
-    <div class="m">${r.ef?'EF '+r.ef.toFixed(3)+' \u00b7 ':''}${r.vi?'VI '+r.vi.toFixed(2)+' \u00b7 ':''}${r.kcal?Math.round(r.kcal)+' kcal'+(r.burnSrc==='HR-est'?'(est)':'')+' \u00b7 ':''}${r.dur?r.dur+' \u00b7 ':''}${r.temp||''}</div>
+    const dur = (r.dur||'').split(' / ')[0];   // imported rides store "3h09 / 53.1mi / 685m"
+    // One line when collapsed (date, title, duration, flag); tap it for the details.
+    return `<div class="item rideRow${openRides.has(key)?' open':''}" data-ridekey="${encodeURIComponent(key)}"><div style="flex:1;min-width:0;">
+    <div class="rideHead"><span class="rd">${(r.date||'').slice(5)}</span><span class="rt">${r.title}</span><span class="rdur">${dur}</span>${flag}</div>
+    <div class="rideDetail"><div class="m">${r.date}${badge} \u00b7 ${r.ef?'EF '+r.ef.toFixed(3)+' \u00b7 ':''}${r.vi?'VI '+r.vi.toFixed(2)+' \u00b7 ':''}${r.kcal?Math.round(r.kcal)+' kcal'+(r.burnSrc==='HR-est'?'(est)':'')+' \u00b7 ':''}${r.dur?r.dur+' \u00b7 ':''}${r.temp||''}</div>
     ${rcLine}
-    ${r.note?'<div class="m">'+r.note+'</div>':''}</div>
+    ${r.note?'<div class="m">'+r.note+'</div>':''}</div></div>
     <button class="del" data-rmride="${encodeURIComponent(key)}">&times;</button></div>`;
   }).join('');
+  document.querySelectorAll('#rideList .rideHead').forEach(h=>h.onclick=()=>{
+    const row=h.closest('.rideRow'), k=decodeURIComponent(row.dataset.ridekey);
+    if(row.classList.toggle('open')) openRides.add(k); else openRides.delete(k);
+  });
   document.querySelectorAll('#rideList [data-rmride]').forEach(b=>b.onclick=async ()=>{
     const key=decodeURIComponent(b.dataset.rmride);
     const [date,title]=key.split('||');
