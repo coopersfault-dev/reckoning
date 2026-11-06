@@ -330,6 +330,7 @@ async function importNew(){
     if(added.length){
       msg('Saving ' + added.length + ' ride' + (added.length === 1 ? '' : 's') + '…');
       await writeRides(added);
+      window.dispatchEvent(new CustomEvent('reckoning:rides', { detail: added }));
       try{ renderRides(); drawBalance(); renderFood(); }catch(e){ console.error(e); }
     }
     const t = new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
