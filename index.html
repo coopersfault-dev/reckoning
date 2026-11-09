@@ -472,8 +472,9 @@ function emptyState(){
 }
 
 async function pullState(){
-  const { data: { user } } = await sb.auth.getUser();
-  if(!user) return null;
+  const { data: { user }, error: uErr } = await sb.auth.getUser();
+  if(uErr) throw new Error('could not check sign-in: ' + uErr.message);
+  if(!user) throw new Error('not signed in');
   const uid = user.id;
   const [w,f,r,fi,sm,ck,pl,cfg] = await Promise.all([
     sb.from('weights').select('date,lb').eq('user_id',uid),
@@ -485,6 +486,11 @@ async function pullState(){
     sb.from('daily_plan').select('*').eq('user_id',uid),
     sb.from('user_config').select('*').eq('user_id',uid).maybeSingle()
   ]);
+  // A failed load must never fall through to the defaults below: the next save
+  // would delete the real table and write the defaults back in its place.
+  const failed = [['weights',w],['ftp_tests',f],['rides',r],['food_items',fi],['saved_meals',sm],['daily_checklist',ck],['daily_plan',pl],['user_config',cfg]]
+    .filter(([,res]) => !res || res.error);
+  if(failed.length) throw new Error('could not load ' + failed.map(([t,res]) => t + ' (' + (res && res.error ? res.error.message : 'no response') + ')').join(', '));
   const anyData = [w,f,r,fi,sm,ck,pl].some(res => (res.data||[]).length) || cfg.data;
   if(!anyData) return emptyState();
   const s = { weights:[], ftp:[], rides:[], food:{}, saved:[], dailyTotals:{}, checklist:{}, plan:{}, config:{...DEFAULT_CONFIG} };
@@ -1114,12 +1120,31 @@ document.getElementById('wAdd').onclick=async ()=>{
   // Await the actual DB write directly, so a test entry can't look saved
   // locally while silently failing to sync.
   const el=document.getElementById('wLast');
-  if(el){ el.style.color=''; el.textContent='Saving to cloud\u2026';
-    try{ await pushState('weights'); el.textContent='Saved '+lb.toFixed(1)+' lb on '+d+' \u2713 (synced to cloud)'; }
-    catch(e){ el.textContent='Saved locally but cloud sync FAILED: '+e.message; el.style.color='#e5484d'; return; }
-    setTimeout(renderWeightLast, 3000);
+  if(el){ el.style.color=''; el.textContent='Saving to cloud\u2026'; }
+  try{ await saveOneWeight(d, lb); if(el) el.textContent='Saved '+lb.toFixed(1)+' lb on '+d+' \u2713 (synced to cloud)'; }
+  catch(e){
+    if(el){ el.textContent='Saved locally but cloud sync FAILED: '+e.message; el.style.color='#e5484d'; }
+    else alert('Saved locally but cloud sync FAILED: '+e.message);
+    return;
   }
+  setTimeout(renderWeightLast, 3000);
 };
+// Write ONLY this one day's weight row. Never delete-and-rewrite the whole
+// weights table: a stale or half-loaded copy in memory would wipe the history.
+// Holds the sync lock so it can't interleave with a background sync.
+async function saveOneWeight(d, lb){
+  while(_syncRunning) await new Promise(r => setTimeout(r, 150));
+  _syncRunning = true;
+  try{
+    const { data: { user } } = await sb.auth.getUser();
+    if(!user) throw new Error('not signed in');
+    await chk('weights.delete', sb.from('weights').delete().eq('user_id', user.id).eq('date', d));
+    await chk('weights.insert', sb.from('weights').insert({ user_id: user.id, date: d, lb }));
+  } finally {
+    _syncRunning = false;
+    if(_syncQueued){ _syncQueued = false; scheduleSync(); }
+  }
+}
 function renderWeightLast(){
   const el=document.getElementById('wLast'); if(!el) return;
   const w=latest(state.weights);
@@ -1283,9 +1308,24 @@ function showAuth(){
   document.getElementById('app').style.display='none';
 }
 
+// Red banner at the top of the app when the cloud data could not be loaded.
+function showLoadError(text){
+  let b = document.getElementById('loadErr');
+  if(!text){ if(b) b.remove(); return; }
+  if(!b){
+    b = document.createElement('div'); b.id = 'loadErr';
+    b.style.cssText = 'color:#e5484d;border:0.5px solid #e5484d;border-radius:8px;padding:10px;margin:0 0 12px;font-size:14px;';
+    const app = document.getElementById('app'); app.insertBefore(b, app.firstChild);
+  }
+  b.textContent = '⚠ Your data did not load from the cloud: ' + text + '. Nothing was changed. Reload the page to try again, and don\'t log anything until it loads.';
+}
+
 async function initApp(){
-  const remote = await pullState();
-  state = remote || emptyState();
+  let remote;
+  try{ remote = await pullState(); }
+  catch(e){ showLoadError(e.message); return; }
+  showLoadError('');
+  state = remote;
   archiveAndTrim();
   try{ localStorage.setItem(KEY, JSON.stringify(state)); }catch(e){}
   renderAll();
